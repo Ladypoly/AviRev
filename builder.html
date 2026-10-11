@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AviRev — Avatar builder</title>
+<link rel="stylesheet" href="builder.css">
+<script type="importmap">{"imports":{"three":"./libs/three/package/build/three.module.js"}}</script>
+<script type="module" src="builder.js"></script></head>
+<body>
+<header class="builder-header"><a href="index.html" class="brand">AviRev<span> / Workshop</span></a><nav aria-label="Review mode"><a href="index.html">Asset review</a><a href="builder.html" aria-current="page">Avatar builder</a></nav><div class="family-switch" role="group" aria-label="Avatar family"><button data-family="human" aria-pressed="true">Human</button><button data-family="robot" aria-pressed="false">Robot</button></div></header>
+<main class="builder-layout">
+  <section class="stage" aria-label="Interactive avatar preview">
+    <div class="stage-heading"><p class="eyebrow">Imported Unity geometry / live 3D</p><h1>Make a look.</h1><p id="scene-status" role="status" aria-live="polite">Loading the avatar catalog…</p></div>
+    <div id="viewport" tabindex="0" aria-label="3D avatar. Drag to orbit, scroll to zoom. Use the camera buttons for keyboard navigation."></div>
+    <div id="loading" class="loading"><span class="loader"></span><p>Preparing imported meshes…</p></div>
+    <div class="view-controls"><div class="segments" role="group" aria-label="Camera"><button data-camera="front">Front</button><button data-camera="threequarter" aria-pressed="true">¾</button><button data-camera="side">Side</button><button data-camera="back">Back</button><button id="frame">Fit view</button></div><div class="switches"><label><input id="wire" type="checkbox"> Wireframe</label><label><input id="cuts" type="checkbox"> Coverage overlay</label><button id="snapshot">Save image</button></div></div>
+    <div class="stage-foot"><p id="mesh-stats">Geometry counts will appear here.</p><button id="diagnostics-toggle" aria-expanded="false" aria-controls="diagnostics">Diagnostics ↓</button></div>
+    <section id="diagnostics" class="diagnostics" hidden><h2>Preview diagnostics</h2><div id="diagnostic-content"></div><p class="notice">Materials translate the project's surface channels into WebGL lighting. This is a browser authoring preview; PC/Quest lighting, animation and account progression are validated separately in Unity.</p></section>
+  </section>
+  <aside class="workbench" aria-label="Avatar controls">
+    <div class="workbench-header"><h2>Your avatar</h2><p>All art unlocked for review. Unity availability and compatibility rules are retained.</p><p class="hint">Compact web textures: 512px, with clipped hair at 1024px. Native geometry, shape keys and coverage are retained.</p><label class="authoring-mode"><input id="authoring" type="checkbox"> Show held-back authoring controls</label></div>
+    <nav id="builder-groups" class="group-tabs" aria-label="Avatar categories"></nav>
+    <div id="builder-controls" class="controls"></div>
+    <div class="config-actions"><button id="reset-config">Default look</button><button id="import-config">Import JSON</button><button id="export-config" class="primary">Export JSON</button><p id="storage-status">Changes stay in this browser.</p></div>
+  </aside>
+</main>
+<dialog id="config-dialog" aria-labelledby="config-title"><div class="dialog-head"><h2 id="config-title">Import AvatarConfig</h2><button id="close-config">Close ✕</button></div><p>Paste Unity's version 2 AvatarConfig JSON. Your current look changes only after the document validates.</p><textarea id="config-text" spellcheck="false" aria-label="AvatarConfig JSON" rows="14"></textarea><p id="config-error" role="alert"></p><div class="dialog-actions"><label class="file-pick">Choose JSON file<input id="config-file" type="file" accept=".json,application/json"></label><button id="apply-config" class="primary">Apply configuration</button></div></dialog>
+<div id="fatal" class="fatal" hidden role="alert"><h2>Preview could not start</h2><p id="fatal-message"></p><button onclick="location.reload()">Try again</button><a href="index.html">Return to asset review</a></div>
+</body></html>

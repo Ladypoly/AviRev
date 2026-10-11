@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workshop — asset review</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="data.js" defer></script>
+  <script src="data/entries_00.js" defer></script>
+  <script src="data/entries_01.js" defer></script>
+  <script src="data/entries_02.js" defer></script>
+  <script src="data/entries_03.js" defer></script>
+  <script src="data/entries_04.js" defer></script>
+  <script src="data/entries_05.js" defer></script>
+  <script src="data/renders_00.js" defer></script>
+  <script src="data/renders_01.js" defer></script>
+  <script src="data/renders_02.js" defer></script>
+  <script src="data/renders_03.js" defer></script>
+  <script src="data/renders_04.js" defer></script>
+  <script src="data/renders_05.js" defer></script>
+  <script src="data/renders_06.js" defer></script>
+  <script src="data/renders_07.js" defer></script>
+  <script src="data/renders_08.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div><p class="eyebrow">The Workshop / Blender collection review</p><h1>Wardrobe<span class="outline"> study.</span></h1></div>
+    <div class="summary"><strong id="total">—</strong><span>assets &amp; outfit studies</span><small id="snapshot">Loading inventory…</small></div>
+  </header>
+  <main>
+    <nav class="mode-nav" aria-label="Workspace"><a href="index.html" aria-current="page">Asset review</a><a href="builder.html">Avatar builder</a></nav>
+    <div class="intro"><p>Every generation of the wardrobe. Inspect its materials, geometry and Unity availability.</p><button id="about" class="quiet" aria-expanded="false" aria-controls="notes">Read the review notes ↓</button></div>
+    <section id="notes" hidden class="notes" aria-label="Review notes">
+      <p><b>Textured views show the authored Blender materials.</b> Studio lighting differs from Unity. Diagnostic comparison colors distinguish garment surfaces; clay and wire views expose geometry. Outfit studies include three static body profiles.</p>
+      <p><b>Unity labels:</b> green means currently selectable, amber means imported or used as a dependency, red means source only. Labels are matched to the exported Unity catalogs, not guessed from Blender collection names.</p>
+      <p><b>Triangle counts:</b> source mesh triangles are calculated from Blender mesh topology. Evaluated render triangles, when available, include the modifiers and body cuts used for these renders. Outfit source totals include the reference body; garment-only counts are shown separately in the details.</p>
+      <p><b>Issue labels:</b> confirmed checks and documented follow-ups have separate statuses. An item without a listed issue has not automatically passed a full review.</p>
+      <div id="meta-notes"></div>
+    </section>
+    <nav id="categories" class="categories" aria-label="Asset categories"></nav>
+    <section class="toolbar" aria-label="Review controls">
+      <label class="search">Find an asset<input id="search" type="search" placeholder="Name, material, scene, issue…" autocomplete="off"></label>
+      <label>Collection scope<select id="scope"><option value="all">All scopes</option></select></label>
+      <label>Unity availability<select id="unity"><option value="all">All assets</option><option value="selectable">Selectable in Unity</option><option value="imported">Imported / dependency</option><option value="source">Source only</option><option value="unknown">Not yet verified</option></select></label>
+      <label>Body profile<select id="profile"><option value="all">All profiles</option></select></label>
+      <label>Issue filter<select id="issue"><option value="all">All assets</option><option value="any">Has listed issues</option><option value="confirmed">Confirmed issues</option><option value="followup">Follow-up / needs review</option><option value="none">No listed issues</option></select></label>
+      <label>Sort<select id="sort"><option value="similarity">Similar silhouettes</option><option value="name">Name A–Z</option><option value="triangles">Most triangles</option><option value="issues">Most listed issues</option></select></label>
+    </section>
+    <section class="renderbar" aria-label="Render display">
+      <div class="segments" id="modes" role="group" aria-label="Rendering"><button data-mode="textured" aria-pressed="true">Textured</button><button data-mode="diagnostic" aria-pressed="false">Diagnostic</button><button data-mode="clay" aria-pressed="false">Clay</button><button data-mode="wire" aria-pressed="false">Wireframe</button></div>
+      <div class="segments" id="views" role="group" aria-label="Camera"><button data-view="front" aria-pressed="false">Front</button><button data-view="side" aria-pressed="false">Side</button><button data-view="threequarter" aria-pressed="true">¾ view</button><button data-view="back" aria-pressed="false">Back</button></div>
+      <button id="hover-wire" aria-pressed="true">Hover wire: On</button>
+      <button id="all-versions" aria-pressed="false">Show every version</button>
+      <div class="renderhint">Click a study for its inventory and review notes.</div>
+      <button id="compare" disabled>Compare <span id="compare-count">0</span>/2</button>
+    </section>
+    <div class="sheetheading"><h2 id="sheet-title">All assets</h2><p id="results" role="status" aria-live="polite"></p></div>
+    <div id="sheet" class="sheet"></div>
+    <div id="empty" class="empty" hidden><h3>No matching studies</h3><p>Choose another category or clear the search and filters.</p><button id="clear">Clear filters</button></div>
+    <nav class="pagination" aria-label="Contact sheet pages"><button id="prev">← Previous</button><span id="pages"></span><button id="next">Next →</button></nav>
+    <section class="downloads"><div><p class="eyebrow">WebP contact sheets</p><h2>Category atlases</h2><p>Download labeled contact sheets for the selected category, camera and render mode. Pages are assembled in your browser at full 512px tile resolution and include every source version.</p></div><div id="downloads"></div></section>
+    <footer><span id="source">Inventory source pending</span><span>Read-only review / no authoring data is changed</span></footer>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="dialogtop"><p class="eyebrow" id="detail-scope"></p><button class="close" data-close="detail" aria-label="Close asset details">Close ✕</button></div><div id="detail-body"></div></dialog>
+  <dialog id="comparison" aria-labelledby="compare-title"><div class="dialogtop"><h2 id="compare-title">Front · side · back</h2><button class="close" data-close="comparison" aria-label="Close comparison">Close ✕</button></div><div id="comparison-modes" class="segments" role="group" aria-label="Comparison rendering"></div><div id="comparison-body" class="comparison-body"></div></dialog>
+</body>
+</html>
