@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { PALM_FRACTION, loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, createWingFlap, posedPositions } from './builder-animation.mjs?v=594b31c0b38e';
 import { OrbitControls } from './libs/three/package/examples/jsm/controls/OrbitControls.js';
-import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
-import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=7c5c6c7160c1';
+import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=07aeffe3c350';
+import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=89f98db27c04';
 import { coverageFor, cullTriangles } from './builder-model.mjs?v=2776b8514534';
 import { postureMatrices, skinPosture } from './builder-posture.mjs?v=8f0df2f7d92d';
 

@@ -1,0 +1,323 @@
+// TEMPORARY (AviRev web parity export, 2026-10-12). Read-only: loads the saved global reward ladder (no player
+// data), builds the live menu catalogs with the app's own builders and writes JSON outside the project. Delete after use.
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using Greenfield.Menu;
+using SideQuest.AvatarUI;
+using SideQuest.Progression.Catalog;
+using SideQuest.Progression.Rewards;
+using UnityEditor;
+using UnityEngine;
+
+namespace Greenfield.AvatarUI.Editor.AviRevExport
+{
+    public static class AviRevContractExport
+    {
+        const string WebRoot = "C:/Users/Elin/blender-comparison/asset_review_20261011/avi-rev-pages/";
+        const long LadderUser = 3105120;
+
+        [MenuItem("Tools/AviRev/Export Web Creator Contract (temporary)")]
+        public static void Export()
+        {
+            var folder = Path.Combine(Application.persistentDataPath, "SideQuest");
+            var store = new RewardsStore(folder);
+            var ladderPath = store.LadderPath(LadderUser);
+            var ladder = store.LoadCatalogs(LadderUser).Ladder;
+            if (ladder == null) { Debug.LogError("[AviRevExport] no saved ladder at " + ladderPath); return; }
+            // Ladder only: rebuilt with RewardsSnapshot.None so no account/ownership record reaches the export.
+            var rewards = RewardCatalogBuilder.Build(RewardsSnapshot.None, ladder);
+            var catalog = rewards.Menu;
+            var tiers = new TierSlider(catalog);
+            var top = tiers.LevelForIndex(tiers.MaxIndex);
+            var options = AvatarOptionCatalog.Build(catalog, CatalogRealOptions.Shared);
+            var palettes = AvatarPalettes.From(rewards.Palettes);
+            var thumbs = new RewardThumbnails(rewards.Art, null);
+            var source = new PreviewAllowanceSource(catalog, top);
+            string Tr(string key, string fallback) => MenuLocalization.Tr(key, fallback) ?? fallback;
+
+            var ladderText = File.ReadAllText(ladderPath);
+            var contract = new Dictionary<string, object>
+            {
+                ["schema"] = 1,
+                ["meta"] = new Dictionary<string, object>
+                {
+                    ["generatedAt"] = DateTime.UtcNow.ToString("o"),
+                    ["unityVersion"] = Application.unityVersion,
+                    ["ladderSavedAt"] = Between(ladderText, "\"saved_at\":\"", "\""),
+                    ["ladderSha256"] = Sha(ladderText),
+                    ["topLevel"] = top,
+                    ["tierStops"] = tiers.Stops.ToList(),
+                    ["source"] = "RewardCatalogBuilder.Build(RewardsSnapshot.None, saved global ladder).Menu + AvatarOptionCatalog.Build(CatalogRealOptions.Shared) + PreviewAllowanceSource(top)",
+                },
+                ["families"] = options.Families().Select(f => (object)AvatarConfig.FamilyKey(f)).ToList(),
+                ["strings"] = Strings(Tr),
+                ["groups"] = options.Groups.Select(g => (object)Group(g, options, catalog, source, palettes, thumbs, rewards.Art, Tr)).ToList(),
+                ["allowances"] = Allowances(options, source),
+                ["glow"] = Glow(OptionAvailability.Glow(source, catalog)),
+                ["glowLimits"] = new Dictionary<string, object> { ["min"] = RobotShaderProps.MinGlowIntensity, ["max"] = RobotShaderProps.MaxGlowIntensity, ["base"] = RobotShaderProps.BaseGlowIntensity, ["top"] = RobotShaderProps.MaxGlowFor(source.Get(CosmeticCategories.RobotGlowColours)) },
+                ["palettes"] = palettes.Ids.ToDictionary(id => id, id => (object)palettes.Get(id).Select(c => (object)Hex(c)).ToList()),
+                ["quickPickCount"] = AvatarPalettes.QuickPickCount,
+                ["rules"] = new Dictionary<string, object>
+                {
+                    ["hatlessHair"] = HeadgearRules.HatlessHair.OrderBy(x => x).Select(x => (object)x).ToList(),
+                    ["piecesShown"] = ClothingLayers.PiecesShown,
+                    ["femaleFrom"] = BodyShape.FemaleFrom,
+                    ["lipShade"] = HumanColourDefaults.LipShade,
+                    ["nailShade"] = HumanColourDefaults.NailShade,
+                    ["defaultVisemeGrade"] = CosmeticGrades.Limited,
+                    ["hiddenTiles"] = options.Groups.SelectMany(g => g.Rows).SelectMany(r => Enumerable.Range(1, Math.Max(0, r.PlaceholderCount)).Where(o => HiddenTiles.IsHidden(r.CategoryId, o)).Select(o => (object)(r.CategoryId + ":" + o))).ToList(),
+                    ["pieceCategories"] = new List<object> { CharacterPieceCategories.Top, CharacterPieceCategories.Bottom, CharacterPieceCategories.Dress },
+                },
+            };
+            Write(WebRoot + "browser_data/creator_contract.json", contract);
+            Write(WebRoot + "tests/fixtures/unity_creator_vectors.json", Vectors(options, catalog, source, palettes));
+            Debug.Log("[AviRevExport] wrote creator_contract.json and unity_creator_vectors.json at level " + top);
+        }
+
+        // ------------------------------------------------------------------ contract parts
+
+        static Dictionary<string, object> Strings(Func<string, string, string> tr)
+        {
+            var keys = new (string Key, string Fallback)[]
+            {
+                ("Options/Avatar/NavTitle", "Create Your Avatar"), ("Options/Avatar/NavSubtitle", "Express yourself"),
+                ("Options/Avatar/MirrorTitle", "Your Avatar"), ("Options/Avatar/MirrorSubtitle", "A preview of how you look"),
+                ("Options/Avatar/MirrorFront", "Front"), ("Options/Avatar/MirrorSide", "Side"),
+                ("Options/Avatar/MirrorLoading", "Loading avatar…"), ("Options/Avatar/MirrorNoAvatar", "No avatar loaded"),
+                ("Options/Avatar/None", "None"), ("Options/Avatar/Locked", "Locked"), ("Options/Avatar/LevelShort", "Lv {0}"),
+                ("Options/Avatar/GroupCount", "{0} of {1}"), ("Options/Avatar/Status", "Lv {0} · {1} of {2} unlocked in {3}"),
+                ("Options/Avatar/StatusNoTiles", "Lv {0} · {1}"), ("Options/Avatar/PreviewLevel", "Lv {0}"), ("Options/Avatar/Preview", "(preview)"),
+                ("Options/Avatar/NotWithHair", "Not with this hair"), ("Options/Avatar/DefaultColour", "Default"),
+                ("Options/Avatar/MoreColours", "{0} more at level {1}"), ("Options/Avatar/GlowStrength", "Glow strength"),
+                ("Options/Avatar/GlowUpTo", "Up to {0}"), ("Options/Avatar/GlowNext", "Up to {0} · {1} at level {2}"),
+                ("Options/Avatar/ColourFor", "Colour – {0}"), ("Options/Avatar/Upload", "Upload…"), ("Options/Avatar/Info", "Details"),
+                ("Options/Avatar/Needs2D", "Available on PC in 2D mode"), ("Options/Avatar/Unavailable", "Avatar options are not available."),
+                ("Options/Avatar/Family/Human", "Human"), ("Options/Avatar/Family/Robot", "Robot"), ("Options/Avatar/Family/Pet", "Pets"),
+                ("Options/Avatar/Body/Male", "Male"), ("Options/Avatar/Body/Female", "Female"), ("Options/Avatar/PreviewLabel", "Preview level"),
+            };
+            var result = keys.ToDictionary(k => k.Key, k => (object)tr(k.Key, k.Fallback));
+            foreach (var target in new[] { ("outfit", "Outfit"), ("bottoms", "Bottoms"), ("shoes", "Shoes"), ("headgear", "Headgear"), ("hair", "Hair"), ("facial-hair", "Facial hair"), ("eyes", "Eyes"), ("skin", "Skin"), ("lips", "Lips"), ("nails", "Nails"), ("robot-body", "Body"), ("robot-glow", "Glow"), ("robot-skin", "Skin") })
+                result["Options/Avatar/ColourTarget/" + target.Item1] = tr("Options/Avatar/ColourTarget/" + target.Item1, target.Item2);
+            return result;
+        }
+
+        static Dictionary<string, object> Group(OptionGroup g, AvatarOptionCatalog options, ProgressionCatalog catalog, IAllowanceSource source, AvatarPalettes palettes, RewardThumbnails thumbs, RewardArt art, Func<string, string, string> tr)
+        {
+            // Summarise exactly as AvatarPanelPresenter.Options.Summarise.
+            int unlocked = 0, total = 0, firstLevel = 0; bool anything = false;
+            void Consider(string id)
+            {
+                var level = CosmeticUnlockLevels.ForEnabled(catalog, id);
+                if (level > 0 && (firstLevel == 0 || level < firstLevel)) firstLevel = level;
+                if (source.Get(id).IsEnabled) anything = true;
+            }
+            foreach (var row in g.Rows) { if (row.Hidden) continue; unlocked += OptionAvailability.UnlockedCount(source, row); total += row.RealCount; Consider(row.CategoryId); }
+            foreach (var slot in g.ColourSlots) Consider(slot.CategoryId);
+            foreach (var cap in g.Capabilities) Consider(cap.CategoryId);
+            foreach (var slider in g.Sliders) Consider(slider.CapabilityId);
+            if (!string.IsNullOrEmpty(g.GradeCategoryId)) Consider(g.GradeCategoryId);
+
+            return new Dictionary<string, object>
+            {
+                ["id"] = g.Id, ["title"] = tr("Options/Avatar/Group/" + g.Id, g.Title ?? g.Id), ["rawTitle"] = g.Title, ["glyph"] = g.Glyph,
+                ["family"] = AvatarConfig.FamilyKey(g.Family), ["kind"] = g.Kind.ToString(), ["hidden"] = g.Hidden,
+                ["hint"] = tr("Options/Avatar/GroupHint/" + g.Id, string.Empty),
+                ["summary"] = new Dictionary<string, object> { ["unlocked"] = unlocked, ["total"] = total, ["firstLevel"] = firstLevel, ["anythingEnabled"] = anything },
+                ["rows"] = g.Rows.Select(r => (object)Row(g, r, options, catalog, source, thumbs, art, tr)).ToList(),
+                ["sliders"] = g.Sliders.Select(s => { var st = OptionAvailability.Slider(source, catalog, s); var shape = HumanShapes.Find(s.ShapeId); return (object)new Dictionary<string, object> { ["shapeId"] = s.ShapeId, ["label"] = tr("Options/Avatar/Shape/" + s.ShapeId, s.Label ?? s.ShapeId), ["capabilityId"] = s.CapabilityId, ["ordinal"] = s.Ordinal, ["min"] = s.MinWeight, ["max"] = s.MaxWeight, ["ungated"] = s.Ungated, ["enabled"] = st.Enabled, ["unlockLevel"] = st.UnlockLevel, ["showsTeeth"] = shape != null && shape.ShowsTeeth }; }).ToList(),
+                ["posture"] = g.Posture.Select(p => (object)new Dictionary<string, object> { ["id"] = p.Id, ["label"] = tr("Options/Avatar/Posture/" + p.Id, p.Label ?? p.Id), ["min"] = p.Min, ["max"] = p.Max, ["unit"] = p.Unit, ["wireCode"] = p.WireCode }).ToList(),
+                ["colourSlots"] = g.ColourSlots.Select(s => (object)Slot(s, catalog, source, palettes, tr)).ToList(),
+                ["gradeCategoryId"] = g.GradeCategoryId, ["glowCategoryId"] = g.GlowCategoryId,
+                ["gradeCaption"] = string.IsNullOrEmpty(g.GradeCategoryId) ? null : tr("Options/Avatar/Grade/" + g.GradeCategoryId, "Face animation"),
+                ["grades"] = g.Grades.Select(c => { var st = string.IsNullOrEmpty(g.GradeCategoryId) ? default : OptionAvailability.Grade(source, catalog, g.GradeCategoryId, c.Grade); return (object)new Dictionary<string, object> { ["grade"] = c.Grade, ["label"] = tr("Options/Avatar/GradeName/" + c.Grade, c.Label ?? c.Grade), ["unlocked"] = st.Unlocked, ["unlockLevel"] = st.UnlockLevel }; }).ToList(),
+                ["highestGrade"] = string.IsNullOrEmpty(g.GradeCategoryId) ? null : OptionAvailability.HighestGrade(source, catalog, g.GradeCategoryId, g.Grades),
+                ["capabilities"] = g.Capabilities.Select(c => { var st = OptionAvailability.Capability(source, catalog, c.CategoryId); return (object)new Dictionary<string, object> { ["categoryId"] = c.CategoryId, ["label"] = tr("Options/Avatar/Capability/" + c.CategoryId, c.Label ?? c.CategoryId), ["action"] = c.Action.ToString(), ["needs2D"] = c.Needs2D, ["enabled"] = st.Enabled, ["unlockLevel"] = st.UnlockLevel }; }).ToList(),
+            };
+        }
+
+        static Dictionary<string, object> Row(OptionGroup g, OptionRow r, AvatarOptionCatalog options, ProgressionCatalog catalog, IAllowanceSource source, RewardThumbnails thumbs, RewardArt art, Func<string, string, string> tr)
+        {
+            string Name(int ordinal, BodyType body)
+            {
+                if (ordinal <= 0) return tr("Options/Avatar/None", "None");
+                var custom = thumbs.DisplayName(r, ordinal, body);
+                return !string.IsNullOrEmpty(custom) ? custom : options.OptionName(r.CategoryId, ordinal, body);
+            }
+            var bodies = r.PerBodyType ? new[] { BodyType.Male, BodyType.Female } : new[] { BodyType.None };
+            var tiles = r.TileOrdinals().Select(o =>
+            {
+                var st = OptionAvailability.Tile(source, catalog, r.CategoryId, o);
+                var tile = new Dictionary<string, object> { ["ordinal"] = o, ["unlocked"] = st.Unlocked, ["unlockLevel"] = st.UnlockLevel, ["names"] = bodies.ToDictionary(b => BodyTypes.ToKey(b), b => (object)Name(o, b)) };
+                if (o > 0 && art.TryGet(r.CategoryId, o, out var item)) tile["image"] = new Dictionary<string, object> { ["male"] = item.ImageUrl, ["female"] = string.IsNullOrEmpty(item.ImageUrlFemale) ? item.ImageUrl : item.ImageUrlFemale };
+                return (object)tile;
+            }).ToList();
+            return new Dictionary<string, object>
+            {
+                ["categoryId"] = r.CategoryId, ["title"] = tr("Options/Avatar/Row/" + r.CategoryId, r.Title ?? r.CategoryId), ["rawTitle"] = r.Title, ["singular"] = r.Singular,
+                ["perBodyType"] = r.PerBodyType, ["allowNone"] = r.AllowNone, ["placeholderCount"] = r.PlaceholderCount,
+                ["realOrdinals"] = r.RealOrdinals?.Select(x => (object)x).ToList(), ["unlockOrder"] = r.UnlockOrder?.Select(x => (object)x).ToList(),
+                ["closedOrder"] = r.ClosedOrder, ["hidden"] = r.Hidden, ["defaultOrdinal"] = r.DefaultOrdinal, ["lowestOrdinal"] = r.LowestOrdinal, ["minOrdinal"] = r.MinOrdinal,
+                ["realCount"] = r.RealCount, ["unlockedCount"] = OptionAvailability.UnlockedCount(source, r),
+                ["legal"] = Enumerable.Range(0, Math.Max(1, r.PlaceholderCount + 1)).Where(o => OptionAvailability.IsLegal(source, r, o)).Select(o => (object)o).ToList(),
+                ["tiles"] = tiles,
+            };
+        }
+
+        static Dictionary<string, object> Slot(ColourSlot s, ProgressionCatalog catalog, IAllowanceSource source, AvatarPalettes palettes, Func<string, string, string> tr)
+        {
+            var st = OptionAvailability.Slot(source, catalog, s, palettes);
+            return new Dictionary<string, object>
+            {
+                ["id"] = s.Id, ["label"] = tr("Options/Avatar/Slot/" + s.Id, s.Label ?? s.Id), ["categoryId"] = s.CategoryId, ["requiresCapabilityId"] = s.RequiresCapabilityId,
+                ["paletteId"] = s.PaletteId, ["supportsGlow"] = s.SupportsGlow, ["unset"] = s.Unset.HasValue ? Hex(s.Unset.Value) : null, ["shownWithCategoryId"] = s.ShownWithCategoryId,
+                ["resettable"] = s.Resettable,
+                ["state"] = new Dictionary<string, object> { ["mode"] = st.Mode.ToString(), ["presets"] = st.Presets.Select(c => (object)Hex(c)).ToList(), ["hiddenCount"] = st.HiddenCount, ["nextLevel"] = st.NextLevel, ["glow"] = Glow(st.Glow) },
+            };
+        }
+
+        static Dictionary<string, object> Glow(GlowState g) => new Dictionary<string, object> { ["visible"] = g.Visible, ["max"] = g.Max, ["nextMax"] = g.NextMax, ["nextLevel"] = g.NextLevel, ["adjustable"] = g.Adjustable };
+
+        static Dictionary<string, object> Allowances(AvatarOptionCatalog options, IAllowanceSource source)
+        {
+            var ids = new HashSet<string>();
+            foreach (var g in options.Groups)
+            {
+                foreach (var r in g.Rows) ids.Add(r.CategoryId);
+                foreach (var s in g.ColourSlots) { ids.Add(s.CategoryId); if (!string.IsNullOrEmpty(s.RequiresCapabilityId)) ids.Add(s.RequiresCapabilityId); }
+                foreach (var c in g.Capabilities) ids.Add(c.CategoryId);
+                foreach (var s in g.Sliders) ids.Add(s.CapabilityId);
+                if (!string.IsNullOrEmpty(g.GradeCategoryId)) ids.Add(g.GradeCategoryId);
+                if (!string.IsNullOrEmpty(g.GlowCategoryId)) ids.Add(g.GlowCategoryId);
+            }
+            return ids.Where(id => !string.IsNullOrEmpty(id)).OrderBy(id => id, StringComparer.Ordinal).ToDictionary(id => id, id => { var a = source.Get(id); return (object)new Dictionary<string, object> { ["enabled"] = a.IsEnabled, ["custom"] = a.IsCustom, ["grade"] = a.Grade }; });
+        }
+
+        // ------------------------------------------------------------------ native reference vectors
+
+        static Dictionary<string, object> Vectors(AvatarOptionCatalog options, ProgressionCatalog catalog, IAllowanceSource source, AvatarPalettes palettes)
+        {
+            var random = new System.Random(20261012);
+            var rows = options.Groups.SelectMany(g => g.Rows).ToList();
+            var slots = options.Groups.SelectMany(g => g.ColourSlots).Select(s => s.Id).Distinct().ToList();
+            var sliders = options.Groups.SelectMany(g => g.Sliders).Select(s => s.ShapeId).Distinct().ToList();
+            var caps = options.Groups.SelectMany(g => g.Capabilities).Select(c => c.CategoryId).Concat(options.Groups.SelectMany(g => g.ColourSlots).Select(s => s.RequiresCapabilityId)).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+            string[] families = { "human", "robot", "shared", "dragon", "" };
+            string[] bodies = { "male", "female", "", "robot" };
+            string RandomHex() => "#" + random.Next(0, 0x1000000).ToString("X6");
+
+            var clamp = new List<object>();
+            for (var i = 0; i < 600; i++)
+            {
+                var cfg = new AvatarConfig { Family = families[random.Next(families.Length)], BodyType = bodies[random.Next(bodies.Length)] };
+                foreach (var _ in Enumerable.Range(0, random.Next(0, 14)))
+                {
+                    var row = rows[random.Next(rows.Count)];
+                    var body = row.PerBodyType ? (random.Next(2) == 0 ? BodyType.Male : BodyType.Female) : BodyType.None;
+                    cfg.SetOrdinal(row.CategoryId, body, random.Next(-1, row.PlaceholderCount + 4));
+                }
+                foreach (var _ in Enumerable.Range(0, random.Next(0, 6)))
+                    cfg.Colours.Add(new ColourEntry { SlotId = random.Next(12) == 0 ? "nope" : slots[random.Next(slots.Count)], Hex = random.Next(15) == 0 ? "zz" : RandomHex() });
+                foreach (var _ in Enumerable.Range(0, random.Next(0, 3)))
+                    if (caps.Count > 0) cfg.SetToggle(caps[random.Next(caps.Count)], random.Next(2) == 0);
+                foreach (var _ in Enumerable.Range(0, random.Next(0, 6)))
+                    cfg.Shapes.Add(new ShapeEntry { Id = random.Next(10) == 0 ? "not_a_shape" : sliders[random.Next(sliders.Count)], Value = random.Next(-150, 251) });
+                cfg.RobotVisemeGrade = new[] { "limited", "extended", "full", "bogus", "" }[random.Next(5)];
+                cfg.GlowIntensity = (float)Math.Round(random.NextDouble() * 4, 2);
+                var input = cfg.ToJson();
+                var changes = new List<string>();
+                var worn = WornConfig.For(AvatarConfig.FromJson(input), source, true, options, catalog, palettes, changes);
+                clamp.Add(new Dictionary<string, object> { ["input"] = input, ["worn"] = worn.ToJson(), ["changes"] = changes.Cast<object>().ToList() });
+            }
+
+            // Picks and the masculine-feminine slider in sequence (ClothingLayers.Pick, BodyShape.SetFemale).
+            var actions = new List<object>();
+            var humanRows = rows.Where(r => !r.Hidden).ToList();
+            for (var i = 0; i < 200; i++)
+            {
+                var cfg = new AvatarConfig();
+                var steps = new List<object>();
+                foreach (var _ in Enumerable.Range(0, random.Next(1, 10)))
+                {
+                    if (random.Next(5) == 0)
+                    {
+                        var weight = random.Next(0, 101);
+                        BodyShape.SetFemale(cfg, weight);
+                        steps.Add(new Dictionary<string, object> { ["female"] = weight });
+                        continue;
+                    }
+                    var row = humanRows[random.Next(humanRows.Count)];
+                    var tiles = row.TileOrdinals().ToList();
+                    if (tiles.Count == 0) continue;
+                    var ordinal = tiles[random.Next(tiles.Count)];
+                    var body = row.PerBodyType ? (cfg.BodyTypeEnum == BodyType.None ? BodyType.Male : cfg.BodyTypeEnum) : BodyType.None;
+                    ClothingLayers.Pick(cfg, row.CategoryId, body, ordinal);
+                    steps.Add(new Dictionary<string, object> { ["categoryId"] = row.CategoryId, ["body"] = BodyTypes.ToKey(body), ["ordinal"] = ordinal });
+                }
+                var current = cfg.BodyTypeEnum == BodyType.None ? BodyType.Male : cfg.BodyTypeEnum;
+                var defaults = new Dictionary<string, object>();
+                foreach (var row in rows)
+                {
+                    var rowBody = row.PerBodyType ? current : BodyType.None;
+                    defaults[row.CategoryId] = DefaultLook.Ordinal(cfg, row.CategoryId, rowBody, current, row.DefaultOrdinal);
+                }
+                var derived = new Dictionary<string, object>();
+                foreach (var slot in slots)
+                    if (HumanColourDefaults.TryDerive(cfg, slot, out var colour)) derived[slot] = Hex(colour);
+                actions.Add(new Dictionary<string, object> { ["steps"] = steps, ["config"] = cfg.ToJson(), ["shownOrdinals"] = defaults, ["derivedColours"] = derived });
+            }
+            return new Dictionary<string, object> { ["schema"] = 1, ["level"] = source.Level, ["clamp"] = clamp, ["actions"] = actions };
+        }
+
+        // ------------------------------------------------------------------ JSON
+
+        static string Hex(Color c) => "#" + ColorUtility.ToHtmlStringRGB(c);
+        static string Sha(string text) { using (var sha = SHA256.Create()) return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text)).Select(b => b.ToString("x2"))); }
+        static string Between(string text, string start, string end) { var a = text.IndexOf(start, StringComparison.Ordinal); if (a < 0) return null; a += start.Length; var b = text.IndexOf(end, a, StringComparison.Ordinal); return b < 0 ? null : text.Substring(a, b - a); }
+
+        static void Write(string path, object value)
+        {
+            var sb = new StringBuilder();
+            Serialize(value, sb);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        static void Serialize(object value, StringBuilder sb)
+        {
+            switch (value)
+            {
+                case null: sb.Append("null"); return;
+                case string s:
+                    sb.Append('"');
+                    foreach (var ch in s)
+                    {
+                        if (ch == '"' || ch == '\\') sb.Append('\\').Append(ch);
+                        else if (ch == '\n') sb.Append("\\n");
+                        else if (ch == '\r') sb.Append("\\r");
+                        else if (ch == '\t') sb.Append("\\t");
+                        else if (ch < 0x20) sb.Append("\\u").Append(((int)ch).ToString("x4"));
+                        else sb.Append(ch);
+                    }
+                    sb.Append('"'); return;
+                case bool b: sb.Append(b ? "true" : "false"); return;
+                case float f: sb.Append(f.ToString("R", System.Globalization.CultureInfo.InvariantCulture)); return;
+                case double d: sb.Append(d.ToString("R", System.Globalization.CultureInfo.InvariantCulture)); return;
+                case int or long: sb.Append(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)); return;
+                case IDictionary dict:
+                    sb.Append('{'); var first = true;
+                    foreach (DictionaryEntry entry in dict) { if (!first) sb.Append(','); first = false; Serialize(entry.Key.ToString(), sb); sb.Append(':'); Serialize(entry.Value, sb); }
+                    sb.Append('}'); return;
+                case IEnumerable list:
+                    sb.Append('['); var firstItem = true;
+                    foreach (var item in list) { if (!firstItem) sb.Append(','); firstItem = false; Serialize(item, sb); }
+                    sb.Append(']'); return;
+                default: Serialize(value.ToString(), sb); return;
+            }
+        }
+    }
+}

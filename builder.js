@@ -1,5 +1,5 @@
-import { assetJSON } from './builder-assets.mjs?v=c326a7020e52';
-import { AvatarRenderer } from './builder-renderer.mjs?v=3d146ec6d1d4';
+import { assetJSON } from './builder-assets.mjs?v=07aeffe3c350';
+import { AvatarRenderer } from './builder-renderer.mjs?v=c0bbed6151c5';
 import { XRConfiguratorPanel, creatorPanelBridge } from './builder-xr-panel.mjs?v=12f1d69d2672';
 import { AvatarAR } from './builder-ar.mjs?v=1f22246153a3';
 import { resolve } from './builder-model.mjs?v=2776b8514534';
@@ -264,7 +264,7 @@ function normalize(source) {
 
 async function start() {
   try {
-    [data, contract] = await Promise.all([assetJSON('browser_data/catalog.json').then(normalize), assetJSON('browser_data/creator_contract.json?v=5e25f639716f').then(rules.creatorContract)]);
+    [data, contract] = await Promise.all([assetJSON('browser_data/catalog.json').then(normalize), assetJSON('browser_data/creator_contract.json?v=752a351b890a').then(rules.creatorContract)]);
     if (!Array.isArray(data.families) || !data.families.length) throw new Error('The native Unity catalog export is unavailable.');
     for (const [id, key] of [['lblNavTitle', 'NavTitle'], ['lblNavSubtitle', 'NavSubtitle'], ['lblAvatarMirrorTitle', 'MirrorTitle'], ['lblMirrorSubtitle', 'MirrorSubtitle'], ['btnMirrorViewFront', 'MirrorFront'], ['btnMirrorViewSide', 'MirrorSide'], ['btnColourDefault', 'DefaultColour']]) $(id).textContent = tr(key, $(id).textContent);
     config = rules.newConfig();

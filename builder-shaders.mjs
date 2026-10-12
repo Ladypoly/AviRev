@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { surfaceProfiles } from './builder-surface-profiles.mjs?v=62c5d9ac114c';
 import { robotFaceGLSL, robotFaceUniforms } from './builder-robot-face.mjs?v=bceb42ed921f';
-import { assetBytes, assetPath, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
+import { assetBytes, assetPath, cachedLoad } from './builder-assets.mjs?v=07aeffe3c350';
 import { surfaceProfile, sampledTextureUniforms } from './builder-texture-bindings.mjs?v=648ace8649fe';
 
 const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.needsUpdate = true;
@@ -50,6 +50,8 @@ function attachVertex(shader, decodeHair) {
   shader.vertexShader = 'attribute vec4 avatarColor;attribute vec2 avatarUv2;varying vec2 vAvatarUv;varying vec2 vAvatarUv2;varying vec2 vAvatarHair;\n' + shader.vertexShader;
   shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\nvAvatarUv=uv;vAvatarUv2=avatarUv2;vAvatarHair=avatarColor.rg;${decodeHair ? 'vAvatarHair=vec2(vAvatarHair.x<=0.04045?vAvatarHair.x/12.92:pow((vAvatarHair.x+0.055)/1.055,2.4),vAvatarHair.y<=0.04045?vAvatarHair.y/12.92:pow((vAvatarHair.y+0.055)/1.055,2.4));' : ''}`);
 }
+// UnityEngine.Rendering.BlendMode values 0..10.
+const BLEND_FACTORS = [THREE.ZeroFactor, THREE.OneFactor, THREE.DstColorFactor, THREE.SrcColorFactor, THREE.OneMinusDstColorFactor, THREE.SrcAlphaFactor, THREE.OneMinusSrcColorFactor, THREE.DstAlphaFactor, THREE.OneMinusDstAlphaFactor, THREE.SrcAlphaSaturateFactor, THREE.OneMinusSrcAlphaFactor];
 export async function createMaterial(definition, family, report) {
   const shaderName = definition.shader || '', properties = definition.properties || {}, uniforms = uniformsFor(definition);
   Object.assign(uniforms, await sampledTextureUniforms(definition, loadTexture));
@@ -77,6 +79,11 @@ export async function createMaterial(definition, family, report) {
       }
     };
     material.customProgramCacheKey = () => `unity-masked-${profile}-${properties._Param1?.[3] || 0}-${scattering}`;
+    // Masked PBR's blend/depth properties (soft-alpha scalps use SrcAlpha/OneMinusSrcAlpha, ZWrite off, queue 3000).
+    const src = BLEND_FACTORS[properties._SrcBlend ?? 1], dst = BLEND_FACTORS[properties._DstBlend ?? 0];
+    if (src !== undefined && dst !== undefined && (src !== THREE.OneFactor || dst !== THREE.ZeroFactor)) {
+      Object.assign(material, { transparent: true, blending: THREE.CustomBlending, blendSrc: src, blendDst: dst, blendSrcAlpha: src, blendDstAlpha: dst, depthWrite: properties._ZWrite !== 0 });
+    }
   } else if (shaderName === 'Robot') {
     material = new THREE.MeshStandardMaterial({ side, roughness: 1 - (properties._Smoothness || .2) });
     for (const name of ['_PrimaryColor', '_SecondaryColor', '_GlowColor']) uniforms[name] ??= { value: new THREE.Vector4(1, 1, 1, 1) };

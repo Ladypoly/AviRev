@@ -1,0 +1,40 @@
+// TEMPORARY (AviRev web sync, 2026-10-12). Loads two read-only exporters compiled outside the project and writes
+// their output outside Assets. Runs once when request.txt exists. Delete this folder after use.
+using System;
+using System.IO;
+using System.Reflection;
+using System.Text;
+using UnityEditor;
+
+static class AviRevSyncShim
+{
+    const string Dir = "C:/Users/Elin/AppData/Local/Temp/claude/c--Users-Elin-blender-comparison-asset-review-20261011-avi-rev-pages/3b73d1e2-d5c5-471f-8e39-f1197eb97632/scratchpad/export/";
+
+    [InitializeOnLoadMethod]
+    static void Auto()
+    {
+        if (!File.Exists(Dir + "request.txt")) return;
+        File.Delete(Dir + "request.txt");
+        EditorApplication.delayCall += RunAll;
+    }
+
+    [MenuItem("Tools/AviRev/Sync web export (temporary)")]
+    static void RunAll()
+    {
+        var log = new StringBuilder("started " + DateTime.UtcNow.ToString("o") + "\n");
+        Run(log, "browser_export.dll", "AviRevBrowserExportImplementation", "Run");
+        Run(log, "contract_export.dll", "Greenfield.AvatarUI.Editor.AviRevExport.AviRevContractExport", "Export");
+        log.Append("finished " + DateTime.UtcNow.ToString("o") + "\n");
+        File.WriteAllText(Dir + "result.txt", log.ToString());
+    }
+
+    static void Run(StringBuilder log, string dll, string type, string method)
+    {
+        try
+        {
+            Assembly.LoadFile(Dir + dll).GetType(type, true).GetMethod(method, BindingFlags.Public | BindingFlags.Static).Invoke(null, null);
+            log.Append("OK " + dll + "\n");
+        }
+        catch (Exception error) { log.Append("FAIL " + dll + "\n" + (error.InnerException ?? error) + "\n"); }
+    }
+}

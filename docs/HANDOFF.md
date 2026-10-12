@@ -4,7 +4,16 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `d54e9e489a51` (12 October 2026, eighth release of the day): [Release d54e9e489a51](#release-d54e9e489a51) on top of `349e567bdd44`. Its 5 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live wrist menu switched mode, collision and occlusion in headless Edge.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `3d745ad99df0` (12 October 2026, ninth release of the day): [Release 3d745ad99df0 — Unity sync](#release-3d745ad99df0--unity-sync) on top of `d54e9e489a51`. 785 new data files (content-addressed chunks + `browser_data/textures_r107/`) were uploaded beside the live snapshot, then the manifest, contract, changed modules and `builder.html` last.
+
+## Release 3d745ad99df0 — Unity sync
+
+- **Assets re-exported from the Unity working copy** (Greenfield `852c1bb7`; Human catalog **v107**, Robot **v31**, previously v76/v26). 283 meshes, 561 textures, 254 materials; includes the four sculpted Afro scalp companions, the corrected Human FBX/coverage, torn-jeans textures and today's hair material blend/normal changes. Export validation, texture reachability (561/561 sampled, none omitted) and hybrid-host normalisation (catalog identical to native except delivery fields) all PASS.
+- **Robot skins follow Unity:** 31 native skins; the browser-only 58-skin patch from `bonto_direct/robot_skins` is dropped.
+- **Creator contract and Unity vectors re-exported** (ladder saved 2026-10-12T15:12Z); `tests/unity-parity.mjs` passes 1,802 checks against them.
+- **Soft-alpha Masked PBR:** `createMaterial` honours `_SrcBlend/_DstBlend/_ZWrite` (UnityEngine.Rendering.BlendMode); the scalps (SrcAlpha/OneMinusSrcAlpha, ZWrite 0, queue 3000) now blend over the skin like Unity instead of drawing as a solid layer with pale partings.
+- **How the sync ran (repeatable):** both exporters (`../browser_data/AviRevBrowserExportImplementation.cs` and the contract exporter) are compiled *outside* Unity with Unity's Roslyn against `Library/ScriptAssemblies`; a one-file loader `Assets/_AviRevSync/Editor/AviRevSyncShim.cs` (`[InitializeOnLoadMethod]`, runs once when `request.txt` exists) invokes them, then is moved out. Unity's git status was byte-identical before/after each of the three runs. Pipeline after export: `validate_export.py` → `enrich_texture_metadata.py` → `map_atlas_availability.py` → sampler sets from `builder-texture-bindings.mjs` → `review_texture_reachability.py` → `prepare_compact_textures.py` → clip list (16 NormalOpacity maps by Unity sourcePath) → `prepare_hybrid_delivery.py` → builder-only packager (chunks + `textures_<release>/` + manifest hash in `builder-assets.mjs`). Python 3.12 has numpy/Pillow. Backups: `C:/Users/Elin/blender-comparison/avirev_sync_20261012`.
+- **Textures per release folder:** each release writes its textures to `browser_data/textures_<tag>/` and rewrites catalog URLs, so uploads never overwrite files the live catalog still uses.
 
 ## Release d54e9e489a51
 
