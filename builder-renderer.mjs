@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, createWingFlap, posedPositions } from './builder-animation.mjs?v=1101e0a43ead';
+import { PALM_FRACTION, loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, createWingFlap, posedPositions } from './builder-animation.mjs?v=594b31c0b38e';
 import { OrbitControls } from './libs/three/package/examples/jsm/controls/OrbitControls.js';
 import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
 import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=7c5c6c7160c1';
@@ -115,6 +115,8 @@ export class AvatarRenderer {
       // WebXR grip frame a controller would have in this T-pose hand: -Z toward the thumb, +Y up the arm, +X out of the right hand's back (-X for the left).
       const side=name==='leftHand'?'l':'r',prefix=side==='l'?'Left':'Right',middle=browserPoint('c_middle1.'+side,prefix+'HandMiddle1'),index=browserPoint('c_index1.'+side,prefix+'HandIndex1'),pinky=browserPoint('c_pinky1.'+side,prefix+'HandPinky1');
       if(!middle||!index||!pinky)continue;
+      // WebXR grips sit in the palm, not at the wrist; Puppet tracks this palm point so turning a hand cannot swing the wrist inward.
+      result[name].palm=position.clone().lerp(middle,PALM_FRACTION);
       const aim=middle.sub(position).normalize(),across=index.sub(pinky);across.addScaledVector(aim,-across.dot(aim)).normalize();
       if(!aim.toArray().concat(across.toArray()).every(Number.isFinite)||across.lengthSq()<.5)continue;
       const back=side==='l'?across.clone().cross(aim):aim.clone().cross(across),x=side==='l'?back.negate():back;

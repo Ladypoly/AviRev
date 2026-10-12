@@ -58,6 +58,8 @@ export class XRWorld {
   constructor(scene = null) {
     this.occluders = scene ? new THREE.Group() : null;
     this.occlusionMaterial = scene ? new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: true, depthTest: true, blending: THREE.NoBlending, toneMapped: false }) : null;
+    // Changing the occlusion source briefly tints the surfaces in use (blue room setup, orange scan) so people can see what hides the avatar.
+    this.highlight = scene ? { plane: new THREE.MeshBasicMaterial({ color: 0x5b8cff, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }), mesh: new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }) } : null; this.highlightUntil = 0;
     if (this.occluders) { this.occluders.visible = false; this.occluders.renderOrder = -1000; scene.add(this.occluders); }
     // shortcut: Scanned room surfaces cannot occlude moving hands or unscanned objects; upgrade when per-eye depth sensing is supported correctly.
     this.entries = new Map(); this.detectedKinds = new Set(); this.everDetected = false; this.statusText = 'Room scan unavailable · floor fallback, no obstacle collision'; this.complete = true; this.totalTriangles = 0; }
@@ -121,8 +123,10 @@ export class XRWorld {
     return this.statusText;
   }
   removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } }
+  flash(seconds = 3) { this.highlightUntil = performance.now() + seconds * 1000; this.updateOcclusion(); }
   updateOcclusion() {
     if (!this.occluders) return;
+    const flashing = !!this.highlight && performance.now() < this.highlightUntil;
     // Each posed surface occludes on its own; an incomplete scan pauses movement but must not switch occlusion off (that made every source look identical).
     this.occluders.visible = (!this.occlusionKinds || this.occlusionKinds.size > 0) && this.hasGeometry;
     this.occluding = { mesh: 0, plane: 0 };
@@ -133,7 +137,7 @@ export class XRWorld {
         entry.occluder = new THREE.Mesh(entry.geometry, this.occlusionMaterial);
         entry.occluder.matrixAutoUpdate = false; entry.occluder.renderOrder = -1000; this.occluders.add(entry.occluder);
       }
-      if (entry.occluder) { entry.occluder.visible = this.occluders.visible && shown; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
+      if (entry.occluder) { entry.occluder.material = flashing ? this.highlight[entry.kind] : this.occlusionMaterial; entry.occluder.renderOrder = flashing ? 1 : -1000; entry.occluder.visible = this.occluders.visible && shown; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
     }
   }
   raycast(origin, direction, maxDistance = 4) {
@@ -227,5 +231,5 @@ export class XRWorld {
     }
     return null;
   }
-  restore() { this.occluders?.removeFromParent(); for (const entry of this.entries.values()) { this.removeOccluder(entry); entry.geometry?.dispose(); } this.occlusionMaterial?.dispose(); this.occlusionMaterial = null; this.occluders = null; this.entries.clear(); this.detectedKinds.clear(); this.hasGeometry = false; this.everDetected = false; this.complete = true; this.totalTriangles = 0; }
+  restore() { this.occluders?.removeFromParent(); for (const entry of this.entries.values()) { this.removeOccluder(entry); entry.geometry?.dispose(); } this.occlusionMaterial?.dispose(); this.occlusionMaterial = null; for (const material of Object.values(this.highlight || {})) material.dispose(); this.highlight = null; this.occluders = null; this.entries.clear(); this.detectedKinds.clear(); this.hasGeometry = false; this.everDetected = false; this.complete = true; this.totalTriangles = 0; }
 }

@@ -4,7 +4,14 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `053d731dba5e` (12 October 2026, sixth release of the day): [Release 053d731dba5e](#release-053d731dba5e) on top of `1bb0d039acad`. Its 7 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page flew a winged Robot without console errors.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `349e567bdd44` (12 October 2026, seventh release of the day): [Release 349e567bdd44](#release-349e567bdd44) on top of `053d731dba5e`. Its 7 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page flew a winged Robot without console errors.
+
+## Release 349e567bdd44
+
+- **Wing axis:** `createWingFlap` now rotates about the spine axis (up/down stroke in horizontal flight); the torso-forward axis swung wings toward head and feet.
+- **Puppet hands no longer cross:** (1) targets track the avatar palm (`PALM_FRACTION` = .55 along wrist→middle knuckle, `reference.*.palm`) and `handGoal` steps back to the wrist with the hand's rotation, since WebXR grips sit in the palm; (2) hand deltas scale by arm span (`handScale` = avatar palm span / T-pose grip span) instead of height — the Robot overshot by 14 cm. `tests/native-xr.mjs` "hands together" asserts no crossing (both rigs ≈ 9 cm palm gap for 9 cm grips).
+- **Finger movement in Puppet:** `AvatarAR.fingerCurl` gives 0..1 per finger — XRHand joint bends when hand-tracked (session now requests optional `hand-tracking`), otherwise trigger → index, squeeze → middle/ring/pinky, thumb touch → thumb. The puppet layer curls each finger chain about (finger direction × palm normal), palm side found from the thumb tip. Tested: fingers close toward the palm on both rigs.
+- **Occlusion diagnostics:** changing the source (and entering WebXR) tints the surfaces in use for 3 s (blue room setup, orange scan); the wrist Occlusion row shows the live state (`occluding N setup + M scan` / `room occlusion unavailable`). Root cause of "occlusion not changing" still unconfirmed on hardware.
 
 ## Release 053d731dba5e
 

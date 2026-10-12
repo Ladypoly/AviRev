@@ -30,11 +30,11 @@ async function rig(familyName) {
 const grip = (side, aim, across) => { const back = side === 'l' ? across.clone().cross(aim) : aim.clone().cross(across); return new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(side === 'l' ? back.negate() : back, aim.clone().negate(), across.clone().negate())); };
 const toAvatar = w => v(-w.x, w.y, -w.z); // user faces world -Z; direct avatar frame is turned 180 degrees
 const calibrations = { palmsForward: { l: [v(-1, 0, 0), v(0, 1, 0)], r: [v(1, 0, 0), v(0, 1, 0)], lp: v(-.75, 1.42, 0), rp: v(.75, 1.42, 0) }, palmsDown: { l: [v(-1, 0, 0), v(0, 0, -1)], r: [v(1, 0, 0), v(0, 0, -1)], lp: v(-.75, 1.42, 0), rp: v(.75, 1.42, 0) } };
-const poses = { relaxedHold: { l: [v(0, 0, -1), v(0, 1, 0)], r: [v(0, 0, -1), v(0, 1, 0)], lp: v(-.22, 1, -.3), rp: v(.22, 1, -.3) }, palmsUp: { l: [v(0, 0, -1), v(-1, 0, 0)], r: [v(0, 0, -1), v(1, 0, 0)], lp: v(-.22, 1.05, -.35), rp: v(.22, 1.05, -.35) }, pointDown: { l: [v(0, -1, 0), v(0, 0, -1)], r: [v(0, -1, 0), v(0, 0, -1)], lp: v(-.25, .85, -.1), rp: v(.25, .85, -.1) } };
+const poses = { relaxedHold: { l: [v(0, 0, -1), v(0, 1, 0)], r: [v(0, 0, -1), v(0, 1, 0)], lp: v(-.22, 1, -.3), rp: v(.22, 1, -.3) }, palmsUp: { l: [v(0, 0, -1), v(-1, 0, 0)], r: [v(0, 0, -1), v(1, 0, 0)], lp: v(-.22, 1.05, -.35), rp: v(.22, 1.05, -.35) }, pointDown: { l: [v(0, -1, 0), v(0, 0, -1)], r: [v(0, -1, 0), v(0, 0, -1)], lp: v(-.25, .85, -.1), rp: v(.25, .85, -.1) }, handsTogether: { l: [v(0, 0, -1), v(0, 1, 0)], r: [v(0, 0, -1), v(0, 1, 0)], lp: v(-.045, 1.2, -.35), rp: v(.045, 1.2, -.35) } };
 for (const family of data.families) for (const [calibrationName, calibration] of Object.entries(calibrations)) for (const [poseName, target] of Object.entries(poses)) for (const mode of ['direct', 'mirror']) {
   const human = family.Family === 'human', layer = animation.createPuppetLayer(family), owner = { currentFamily: family, puppetLayer: layer, idleSignature: 's', setPuppetTargets: targets => layer.setTargets(targets) };
   owner.puppetReference = AvatarRenderer.prototype.puppetReference.bind(owner);
-  const ar = { behavior: 'puppet', canMove: () => true, owner, groundY: 0, ui: { mirror: { checked: mode === 'mirror' } }, puppetCalibrationRequested: true };
+  const ar = { behavior: 'puppet', canMove: () => true, fingerCurl: AvatarAR.prototype.fingerCurl, owner, groundY: 0, ui: { mirror: { checked: mode === 'mirror' } }, puppetCalibrationRequested: true };
   let state = calibration; const transform = (p, q) => ({ transform: { matrix: new T.Matrix4().compose(p, q, v(1, 1, 1)).toArray() } });
   const frame = { getPose: space => { const side = space === 'L' ? 'l' : 'r'; return transform(state[side + 'p'], grip(side, ...state[side])); } }, tracked = [{ handedness: 'left', gripSpace: 'L' }, { handedness: 'right', gripSpace: 'R' }];
   const step = () => AvatarAR.prototype.updatePuppet.call(ar, frame, 'space', transform(v(0, 1.6, 0), new T.Quaternion()), tracked, 1 / 72);
@@ -50,6 +50,30 @@ for (const family of data.families) for (const [calibrationName, calibration] of
     check(aim.angleTo(mirror(target[source][0])) < .05, label + ' fingers follow grip');
     check(across.angleTo(mirror(target[source][1])) < .05, label + ' thumb side follows grip');
   }
+  // Controllers held together in front: the palms meet, the avatar hands must not cross (grips sit in the palm, not at the wrist).
+  if (poseName === 'handsTogether') { const at = (map, h, r) => point(R.clone().multiply(map.get(family.skeleton.find(b => b.name === (human ? h : r)).path)).multiply(R)), palm = (s, p) => at(pose, 'hand.' + s, p + 'Hand').lerp(at(pose, 'c_middle1.' + s, p + 'HandMiddle1'), animation.PALM_FRACTION), reference = layer.referencePose(), restSide = Math.sign(at(reference, 'hand.l', 'LeftHand').x - at(reference, 'hand.r', 'RightHand').x), gap = palm('l', 'Left').sub(palm('r', 'Right'));
+    check(Math.sign(gap.x) === restSide && Math.abs(gap.x) < .2, `${family.Family} ${calibrationName} ${mode} hands together do not cross (palm gap ${gap.x.toFixed(3)} m)`); }
+}
+
+// 1b. Controller trigger/grip curl the avatar's fingers toward the palm (thumb on a button bends the thumb).
+for (const family of data.families) {
+  const human = family.Family === 'human', layer = animation.createPuppetLayer(family), owner = { currentFamily: family, puppetLayer: layer, idleSignature: 's', setPuppetTargets: targets => layer.setTargets(targets) };
+  owner.puppetReference = AvatarRenderer.prototype.puppetReference.bind(owner);
+  const ar = { behavior: 'puppet', canMove: () => true, fingerCurl: AvatarAR.prototype.fingerCurl, owner, groundY: 0, ui: { mirror: { checked: false } }, puppetCalibrationRequested: true };
+  let state = calibrations.palmsDown, press = 0; const transform = (p, q) => ({ transform: { matrix: new T.Matrix4().compose(p, q, v(1, 1, 1)).toArray() } });
+  const frame = { getPose: space => { const side = space === 'L' ? 'l' : 'r'; return transform(state[side + 'p'], grip(side, ...state[side])); } };
+  const pad = () => ({ buttons: [{ value: press, pressed: press > .5, touched: press > 0 }, { value: press, pressed: press > .5 }, {}, { touched: press > 0 }] });
+  const tracked = [{ handedness: 'left', gripSpace: 'L', get gamepad() { return pad(); } }, { handedness: 'right', gripSpace: 'R', get gamepad() { return pad(); } }];
+  const step = () => AvatarAR.prototype.updatePuppet.call(ar, frame, 'space', transform(v(0, 1.6, 0), new T.Quaternion()), tracked, 1 / 72);
+  step(); state = poses.relaxedHold;
+  const tips = () => { step(); for (let i = 0; i < 200; i++) layer.update(i / 72); const pose = layer.apply(layer.referencePose()), at = (h, r) => point(R.clone().multiply(pose.get(family.skeleton.find(b => b.name === (human ? h : r)).path)).multiply(R));
+    const wrist = at('hand.l', 'LeftHand'), name = finger => at('c_' + finger + '3.l', 'LeftHand' + finger[0].toUpperCase() + finger.slice(1) + '3'), knuckle = finger => at('c_' + finger + '1.l', 'LeftHand' + finger[0].toUpperCase() + finger.slice(1) + '1');
+    const normal = knuckle('middle').sub(wrist).cross(knuckle('pinky').sub(knuckle('index'))).normalize(), palmSide = knuckle('thumb').sub(wrist).dot(normal) < 0 ? normal.negate() : normal;
+    return { ...Object.fromEntries(['index', 'middle', 'pinky', 'thumb'].map(finger => [finger, name(finger).distanceTo(wrist)])), side: name('middle').sub(knuckle('middle')).dot(palmSide) }; };
+  press = 0; const open = tips(); layer.reset(); ar.puppetCalibration = null; ar.puppetCalibrationRequested = true; state = calibrations.palmsDown; step(); state = poses.relaxedHold; press = 1; const closed = tips();
+  for (const finger of ['index', 'middle', 'pinky']) check(closed[finger] < open[finger] * .85, `${family.Family} ${finger} curls with trigger/grip (${open[finger].toFixed(3)} -> ${closed[finger].toFixed(3)} m)`);
+  check(closed.thumb < open.thumb, `${family.Family} thumb bends when touching a button`);
+  check(closed.side > open.side, `${family.Family} fingers curl toward the palm, not backward (${open.side.toFixed(3)} -> ${closed.side.toFixed(3)})`);
 }
 
 // 2. Holding crouch sits on the floor (pelvis near the floor, not frozen at hip height); right stick forward stands again.

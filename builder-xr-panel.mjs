@@ -306,14 +306,14 @@ export class XRConfiguratorPanel {
   drawWrist() {
     if(!this.wristCanvas)return;
     // The wrist menu: show/hide the creator panel, reposition, and the three scene switches people change most.
-    const rows=new Map((this.bridge.snapshot('scene').controls||[]).map(row=>[row.key,row])),reposition=rows.get('ar-reposition'),behavior=rows.get('ar-behavior'),collision=rows.get('ar-collision'),occlusion=rows.get('ar-occlusion');
-    const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled,behavior?.value,collision?.value,occlusion?.value]);if(signature===this.wristSignature)return;this.wristSignature=signature;
+    const scene=this.bridge.snapshot('scene'),rows=new Map((scene.controls||[]).map(row=>[row.key,row])),occlusionState=((scene.roomStatus||'').match(/occluding [^\u00b7]+|room occlusion [a-z]+|live depth [^\u00b7]+/)||['waiting for room data'])[0].trim(),reposition=rows.get('ar-reposition'),behavior=rows.get('ar-behavior'),collision=rows.get('ar-collision'),occlusion=rows.get('ar-occlusion');
+    const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled,behavior?.value,collision?.value,occlusion?.value,occlusionState]);if(signature===this.wristSignature)return;this.wristSignature=signature;
     const ctx=this.wristCanvas.getContext('2d'),scale=512/480;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,512,512);ctx.setTransform(scale,0,0,scale,0,0);
     this.shape(ctx,4,4,472,472,36,C.ground,C.line,3);
     this.wristRegions=[];
     const ROW=80,GAP=10,TOP=22,X=22,WIDTH=436,y=index=>TOP+index*(ROW+GAP);
     const region=(id,x,top,w,disabled,action)=>this.wristRegions.push({id,x,y:top,w,h:ROW,disabled,action});
-    const button=(id,index,title,fill,ink,action,disabled=false)=>{const hover=this.wristHover===id&&!disabled;this.shape(ctx,X,y(index),WIDTH,ROW,22,disabled?C.locked:hover?(fill===C.accent?'#B7C0FF':C.selected):fill,hover?C.warm:fill===C.accent?null:C.line,3);this.text(ctx,title,240,y(index)+52,WIDTH-30,30,disabled?C.faint:ink,{align:'center',weight:700});region(id,X,y(index),WIDTH,disabled,action);};
+    const button=(id,index,title,fill,ink,action,disabled=false,detail='')=>{const hover=this.wristHover===id&&!disabled;this.shape(ctx,X,y(index),WIDTH,ROW,22,disabled?C.locked:hover?(fill===C.accent?'#B7C0FF':C.selected):fill,hover?C.warm:fill===C.accent?null:C.line,3);this.text(ctx,title,240,y(index)+(detail?38:52),WIDTH-30,detail?27:30,disabled?C.faint:ink,{align:'center',weight:700});if(detail)this.text(ctx,detail,240,y(index)+66,WIDTH-30,19,disabled?C.faint:C.muted,{align:'center'});region(id,X,y(index),WIDTH,disabled,action);};
     const segments=(id,index,label,row,choices)=>{const top=y(index),labelWidth=130,width=(WIDTH-labelWidth)/choices.length;this.text(ctx,label,X+8,top+50,labelWidth-12,24,C.muted,{weight:700});
       choices.forEach(([value,title],i)=>{const key=id+':'+value,x=X+labelWidth+i*width,selected=row?.value===value,disabled=!row||row.disabled,hover=this.wristHover===key&&!disabled;this.shape(ctx,x+3,top,width-6,ROW,20,disabled?C.locked:selected?C.accent:hover?C.selected:C.surface,hover?C.warm:selected?null:C.line,3);this.text(ctx,title,x+width/2,top+51,width-16,27,disabled?C.faint:selected?C.ground:C.text,{align:'center',weight:700});region(key,x+3,top,width-6,disabled,()=>{if(!selected)this.bridge.dispatch(row,value);this.dirty=true;});});};
     button('panel',0,this.hidden?'Show panel':'Hide panel',C.accent,C.ground,()=>{this.hidden=!this.hidden;if(!this.hidden)this.recenter();});
@@ -321,7 +321,7 @@ export class XRConfiguratorPanel {
     segments('mode',2,'Mode',behavior,[['manual','Manual'],['puppet','Puppet']]);
     segments('collision',3,'Collide',collision,[['room','Room'],['floor','Floor']]);
     const ORDER=['off','planes','mesh','both','depth'],NAMES={off:'Off',planes:'Room setup',mesh:'Scanned mesh',both:'Setup + scan',depth:'Live depth'},current=ORDER.includes(occlusion?.value)?occlusion.value:'both',next=ORDER[(ORDER.indexOf(current)+1)%ORDER.length];
-    button('occlusion',4,'Occlusion: '+NAMES[current]+'  \u203A',C.surface,C.text,()=>{if(occlusion)this.bridge.dispatch(occlusion,next);this.dirty=true;},!occlusion||occlusion.disabled);
+    button('occlusion',4,'Occlusion: '+NAMES[current]+'  \u203A',C.surface,C.text,()=>{if(occlusion)this.bridge.dispatch(occlusion,next);this.dirty=true;},!occlusion||occlusion.disabled,occlusionState);
     this.wrist.material.map.needsUpdate=true;
   }
   dispatch(row,value) {const live=this.liveRows?.get(row.key);return this.bridge.dispatch(live?.node||live?.type==='body'?live:row,value);}

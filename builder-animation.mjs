@@ -83,6 +83,11 @@ const positionOf = matrix => new THREE.Vector3().setFromMatrixPosition(matrix);
 const quaternionOf = matrix => { const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); matrix.decompose(p, q, s); return q.normalize(); };
 const reflectedQuaternion = q => quaternionOf(reflection.clone().multiply(new THREE.Matrix4().makeRotationFromQuaternion(q)).multiply(reflection));
 // Targets use avatar-local browser axes; the skinning skeleton uses reflected X.
+/** Where a WebXR grip sits along the avatar's wrist-to-middle-knuckle line (palm centre). */
+export const PALM_FRACTION = .55;
+const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+// Degrees each joint bends at full curl, knuckle first.
+const CURL_DEGREES = { thumb: [15, 35, 45], index: [70, 95, 65], middle: [70, 95, 65], ring: [70, 95, 65], pinky: [70, 95, 65] };
 export function createPuppetLayer(family) {
   const bones = new Map(family.skeleton.map(bone => [bone.name, bone])), rest = new Map(family.skeleton.map(bone => [bone.path, new THREE.Matrix4().fromArray(bone.matrix)]));
   const byPath = new Map(family.skeleton.map(bone => [bone.path, bone])), order = [], visited = new Set();
@@ -91,12 +96,26 @@ export function createPuppetLayer(family) {
   const spine = named('spine_01.x', 'Spine'), neck = named('neck.x', 'Neck'), head = named('head.x', 'Head');
   const upperPaths = new Set(spine ? [spine.path] : []);
   for (const bone of order) if (upperPaths.has(bone.parent)) upperPaths.add(bone.path);
-  const entries = Object.fromEntries(['head','leftHand','rightHand'].map(name => [name,{weight:0,target:null,position:new THREE.Vector3(),quaternion:new THREE.Quaternion()}]));
+  const entries = Object.fromEntries(['head','leftHand','rightHand'].map(name => [name,{weight:0,target:null,position:new THREE.Vector3(),quaternion:new THREE.Quaternion(),curl:Object.fromEntries(FINGERS.map(finger=>[finger,0]))}]));
   let previous = null, reference = new Map(rest);
   const robotLimits = new Map();
   if (family.Family === 'robot') {
     const frame = name => { const bone=bones.get(name),child=bones.get(name==='Spine2'?'Neck':name==='Neck'?'Head':'HeadTop_End'),left=bones.get(name==='Head'?'LeftEye':'LeftShoulder'),right=bones.get(name==='Head'?'RightEye':'RightShoulder'); return anatomicalFrame(positionOf(rest.get(child.path)).sub(positionOf(rest.get(bone.path))),positionOf(rest.get(right.path)).sub(positionOf(rest.get(left.path)))); };
     for(const [name,pitch,roll]of [['Neck',15,12],['Head',25,18]]){const bone=bones.get(name),parent=byPath.get(bone.parent),jointFrame=frame(name),parentFrame=frame(parent.name);robotLimits.set(bone.path,{jointFrame,parentFrame,jointRest:quaternionOf(rest.get(bone.path)),parentRest:quaternionOf(rest.get(parent.path)),restLocal:parentFrame.clone().invert().multiply(jointFrame),pitch:THREE.MathUtils.degToRad(pitch),roll:THREE.MathUtils.degToRad(roll)});}
+  }
+  // Finger curl: each joint bends about (finger direction x palm normal), stored in the joint's own frame so later joints follow earlier ones.
+  const fingerChains = {};
+  for (const [side,prefix] of [['l','Left'],['r','Right']]) {
+    const hand=named('hand.'+side,prefix+'Hand'),index=named('c_index1.'+side,prefix+'HandIndex1'),middle=named('c_middle1.'+side,prefix+'HandMiddle1'),pinky=named('c_pinky1.'+side,prefix+'HandPinky1'),thumbTip=named('c_thumb3.'+side,prefix+'HandThumb3');
+    if(!hand||!index||!middle||!pinky)continue;
+    const at=bone=>positionOf(rest.get(bone.path)),wrist=at(hand),normal=at(middle).sub(wrist).cross(at(pinky).sub(at(index))).normalize();
+    if(thumbTip&&normal.dot(at(thumbTip).sub(wrist))<0)normal.negate(); // the thumb tip rests on the palm side
+    fingerChains[side]=[];
+    for(const finger of FINGERS){
+      const joints=[1,2,3].map(n=>named('c_'+finger+n+'.'+side,prefix+'Hand'+finger[0].toUpperCase()+finger.slice(1)+n));if(joints.some(joint=>!joint))continue;
+      const axis=at(joints[1]).sub(at(joints[0])).normalize().cross(normal);if(!(axis.lengthSq()>.25))continue;axis.normalize();
+      fingerChains[side].push({finger,joints:joints.map((bone,i)=>({bone,local:axis.clone().applyQuaternion(quaternionOf(rest.get(bone.path)).invert()),max:THREE.MathUtils.degToRad(CURL_DEGREES[finger][i])}))});
+    }
   }
   function limitedHead(current,bone,q){const limit=robotLimits.get(bone.path);if(!limit)return q;const parentFrame=quaternionOf(current.get(bone.parent)).multiply(limit.parentRest.clone().invert()).multiply(limit.parentFrame),jointFrame=q.clone().multiply(limit.jointRest.clone().invert()).multiply(limit.jointFrame),localDelta=parentFrame.clone().invert().multiply(jointFrame).multiply(limit.restLocal.clone().invert()),angles=new THREE.Euler().setFromQuaternion(localDelta,'YXZ');angles.x=THREE.MathUtils.clamp(angles.x,-limit.pitch,limit.pitch);angles.z=THREE.MathUtils.clamp(angles.z,-limit.roll,limit.roll);return parentFrame.multiply(new THREE.Quaternion().setFromEuler(angles)).multiply(limit.restLocal).multiply(limit.jointFrame.clone().invert()).multiply(limit.jointRest).normalize();}
   const finite = values => values.every(Number.isFinite);
@@ -119,6 +138,13 @@ export function createPuppetLayer(family) {
     if(index&&middle&&pinky){const aim=positionOf(tPose.get(middle.path)).sub(positionOf(tPose.get(hand.path))),normal=positionOf(tPose.get(pinky.path)).sub(positionOf(tPose.get(index.path))).cross(aim),desired=anatomicalFrame(direction,new THREE.Vector3(0,-sign,0)).multiply(anatomicalFrame(aim,normal).invert()).multiply(quaternionOf(tPose.get(hand.path)));branch(tPose,hand,desired,1);}
   }
   reference=new Map([...tPose].map(([path,matrix])=>[path,matrix.clone()]));
+  // A palm target becomes a wrist goal: step back from the palm by the reference wrist-to-palm offset, turned with the hand.
+  function handGoal(entry,side,prefix,hand){
+    const middle=entry.palm&&named('c_middle1.'+side,prefix+'HandMiddle1');
+    if(!middle||!reference.has(middle.path)||!reference.has(hand.path))return entry.position.clone();
+    const wrist=positionOf(reference.get(hand.path)),offset=positionOf(reference.get(middle.path)).sub(wrist).multiplyScalar(PALM_FRACTION);
+    return entry.position.clone().sub(offset.applyQuaternion(entry.quaternion));
+  }
   const layer = {
     get active() { return Object.values(entries).some(entry=>entry.weight > 1e-5); },
     captureReference(pose) { reference = new Map([...pose].map(([path,matrix])=>[path,matrix.clone()])); },
@@ -127,7 +153,7 @@ export function createPuppetLayer(family) {
       for (const [name,entry] of Object.entries(entries)) {
         const value = targets?.[name], position = value?.position, q = value?.quaternion;
         if (!position || !q || !finite([position.x,position.y,position.z,q.x,q.y,q.z,q.w]) || q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w < 1e-8) { entry.target=null; continue; }
-        const target = {position:new THREE.Vector3(-position.x,position.y,position.z),quaternion:reflectedQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w).normalize()),weight:Number.isFinite(targets.weight ?? 1) ? THREE.MathUtils.clamp(targets.weight ?? 1,0,1) : 0};
+        const target = {position:new THREE.Vector3(-position.x,position.y,position.z),quaternion:reflectedQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w).normalize()),weight:Number.isFinite(targets.weight ?? 1) ? THREE.MathUtils.clamp(targets.weight ?? 1,0,1) : 0,palm:!!value.palm,curl:Object.fromEntries(FINGERS.map(finger=>[finger,THREE.MathUtils.clamp(Number(value.curl?.[finger])||0,0,1)]))};
         if (!entry.target && entry.weight < 1e-5) { entry.position.copy(target.position); entry.quaternion.copy(target.quaternion); }
         entry.target=target;
       }
@@ -135,8 +161,8 @@ export function createPuppetLayer(family) {
     update(seconds) {
       if (!Number.isFinite(seconds)) return;
       const elapsed = previous === null ? 0 : THREE.MathUtils.clamp(seconds-previous,0,.1); previous=seconds;
-      const alpha=1-Math.exp(-elapsed*12);
-      for(const entry of Object.values(entries)) { entry.weight=THREE.MathUtils.lerp(entry.weight,entry.target?.weight||0,alpha); if(entry.target){if(Math.abs(entry.weight-entry.target.weight)<1e-4)entry.weight=entry.target.weight;entry.position.lerp(entry.target.position,alpha);entry.quaternion.slerp(entry.target.quaternion,alpha);} }
+      const alpha=1-Math.exp(-elapsed*12),fingerAlpha=1-Math.exp(-elapsed*20);
+      for(const entry of Object.values(entries)) { for(const finger of FINGERS)entry.curl[finger]=THREE.MathUtils.lerp(entry.curl[finger],entry.target?.curl?.[finger]||0,fingerAlpha); entry.weight=THREE.MathUtils.lerp(entry.weight,entry.target?.weight||0,alpha); if(entry.target){if(Math.abs(entry.weight-entry.target.weight)<1e-4)entry.weight=entry.target.weight;entry.position.lerp(entry.target.position,alpha);entry.quaternion.slerp(entry.target.quaternion,alpha);} }
     },
     apply(current) {
       if (!layer.active) return current;
@@ -161,7 +187,7 @@ export function createPuppetLayer(family) {
       for (const [name,side,prefix] of [['leftHand','l','Left'],['rightHand','r','Right']]) {
         const entry=entries[name];if(entry.weight<=1e-5)continue;
         const upper=named('arm_stretch.'+side,prefix+'Arm'),lower=named('forearm_stretch.'+side,prefix+'ForeArm'),hand=named('hand.'+side,prefix+'Hand');if(!upper||!lower||!hand)continue;
-        const a=positionOf(current.get(upper.path)),b=positionOf(current.get(lower.path)),c=positionOf(current.get(hand.path)),first=a.distanceTo(b),second=b.distanceTo(c),direction=entry.position.clone().sub(a),requested=direction.length();if(requested<1e-8||first<1e-8||second<1e-8)continue;direction.normalize();
+        const a=positionOf(current.get(upper.path)),b=positionOf(current.get(lower.path)),c=positionOf(current.get(hand.path)),first=a.distanceTo(b),second=b.distanceTo(c),direction=handGoal(entry,side,prefix,hand).sub(a),requested=direction.length();if(requested<1e-8||first<1e-8||second<1e-8)continue;direction.normalize();
         const distance=THREE.MathUtils.clamp(requested,Math.abs(first-second)+1e-5,(first+second)*.985),endpoint=a.clone().addScaledVector(direction,distance);
         const sign=Math.sign(positionOf(rest.get(upper.path)).x)|| (side==='l'?-1:1),pole=new THREE.Vector3(sign*.5,-.6,-.35);pole.addScaledVector(direction,-pole.dot(direction));if(pole.lengthSq()<1e-8)pole.set(0,1,0).addScaledVector(direction,-direction.y);pole.normalize();
         const along=(first*first-second*second+distance*distance)/(2*distance),elbow=a.clone().addScaledVector(direction,along).addScaledVector(pole,Math.sqrt(Math.max(0,first*first-along*along)));
@@ -169,6 +195,7 @@ export function createPuppetLayer(family) {
         const newElbow=positionOf(current.get(lower.path)),newHand=positionOf(current.get(hand.path)),aim=endpoint.clone().sub(newElbow);
         if(aim.lengthSq()>1e-10)branch(current,lower,new THREE.Quaternion().setFromUnitVectors(newHand.sub(newElbow).normalize(),aim.normalize()).multiply(quaternionOf(current.get(lower.path))),entry.weight);
         branch(current,hand,entry.quaternion.clone().multiply(quaternionOf(reference.get(hand.path))),entry.weight);
+        for(const chain of fingerChains[side]||[]){const amount=entry.curl[chain.finger];if(!(amount>1e-3))continue;for(const joint of chain.joints){const q=quaternionOf(current.get(joint.bone.path));branch(current,joint.bone,new THREE.Quaternion().setFromAxisAngle(joint.local.clone().applyQuaternion(q),amount*joint.max).multiply(q),entry.weight);}}
       }
       return current;
     },
@@ -179,8 +206,9 @@ export function createPuppetLayer(family) {
 /** Current posed vertex positions for grounding/seating/framing; GPU-skinned items are skinned here only on request. */
 /**
  * Procedural wing beat for the Robot's Wing_L/Wing_R roots; Unity ships the wings without animation. Each wing root and
- * everything under it rotates about the torso's forward axis through the root, mirrored left/right, so every wing
- * mesh (rigid child of the root) flaps.
+ * everything under it rotates about the spine axis through the root, mirrored left/right, so every wing mesh (rigid
+ * child of the root) beats; in the horizontal flying pose that is an up/down stroke. (The torso's forward axis was
+ * wrong: in flight it swung the wings toward head and feet.)
  */
 export function createWingFlap(family, clock = () => performance.now() / 1000) {
   const find = name => family?.skeleton?.find(bone => bone.name === name)?.path;
@@ -188,17 +216,17 @@ export function createWingFlap(family, clock = () => performance.now() / 1000) {
   if (!left || !right) return null;
   const rotation = new THREE.Matrix4(), back = new THREE.Matrix4(), delta = new THREE.Matrix4();
   return {
-    rate: 2.2, amplitude: THREE.MathUtils.degToRad(32), lift: THREE.MathUtils.degToRad(12),
+    rate: 2.2, amplitude: THREE.MathUtils.degToRad(34), lift: 0,
     apply(current) {
       const l = current.get(left), r = current.get(right); if (!l || !r) return current;
       const lp = new THREE.Vector3().setFromMatrixPosition(l), rp = new THREE.Vector3().setFromMatrixPosition(r), lateral = lp.clone().sub(rp);
       const top = spine && current.get(spine), base = hips && current.get(hips);
       const up = top && base ? new THREE.Vector3().setFromMatrixPosition(top).sub(new THREE.Vector3().setFromMatrixPosition(base)) : new THREE.Vector3(0, 1, 0);
-      const forward = lateral.normalize().clone().cross(up.normalize());
-      if (!(forward.lengthSq() > .25)) return current; forward.normalize();
+      const axis = up.normalize().clone().addScaledVector(lateral.normalize(), -up.dot(lateral));
+      if (!(axis.lengthSq() > .25)) return current; axis.normalize();
       const angle = this.lift + this.amplitude * Math.sin(clock() * this.rate * 2 * Math.PI);
       for (const [path, sign, pivot] of [[left, 1, lp], [right, -1, rp]]) {
-        delta.makeTranslation(pivot.x, pivot.y, pivot.z).multiply(rotation.makeRotationAxis(forward, sign * angle)).multiply(back.makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+        delta.makeTranslation(pivot.x, pivot.y, pivot.z).multiply(rotation.makeRotationAxis(axis, sign * angle)).multiply(back.makeTranslation(-pivot.x, -pivot.y, -pivot.z));
         for (const [key, matrix] of current) if (key === path || key.startsWith(path + '/')) matrix.premultiply(delta);
       }
       return current;

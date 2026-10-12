@@ -1,6 +1,6 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { AvatarMovementMotor } from './builder-movement.mjs?v=e772e5919b76';
-import { XRWorld } from './builder-xr-world.mjs?v=0dc639784027';
+import { XRWorld } from './builder-xr-world.mjs?v=eedea3131e01';
 import { AvatarFollower } from './builder-follow.mjs?v=9cb113ed3702';
 
 export function floorCandidate(matrix, viewer, floorY = null) {
@@ -51,7 +51,7 @@ export class AvatarAR {
   applyPerformance(){
     const settings=this.performance(),renderer=this.owner.renderer;this.owner.animationStride=settings.stride;
     const occlusion=settings.occlusion==='depth'&&this.session&&!this.depthActive?'both':settings.occlusion;
-    if(this.world){this.world.occlusionKinds=new Set(OCCLUSION[occlusion]);this.world.updateOcclusion?.();}
+    if(this.world){const kinds=[...OCCLUSION[occlusion]].join();if(this.world.occlusionKey!==kinds){this.world.occlusionKey=kinds;this.world.occlusionKinds=new Set(OCCLUSION[occlusion]);this.world.flash?.(3);}this.world.updateOcclusion?.();}
     if(this.session&&settings.occlusion==='depth'&&!this.depthActive)this.message(this.depthRequested?'Live depth is not available here; using the room setup and scan.':'Live depth starts the next time you enter WebXR. Using the room setup and scan until then.');
     if(this.session){renderer.xr.setFoveation?.(settings.foveation);renderer.shadowMap.enabled=settings.shadows;if(this.shadowLight){this.shadowLight.castShadow=settings.shadows;if(this.shadowLight.shadow.mapSize.x!==settings.shadowMap){this.shadowLight.shadow.mapSize.set(settings.shadowMap,settings.shadowMap);this.shadowLight.shadow.map?.dispose();this.shadowLight.shadow.map=null;}}if(this.shadow)this.shadow.material.visible=settings.shadows;}
   }
@@ -67,11 +67,27 @@ export class AvatarAR {
     if(!this.floorWorld){const ar=this;this.floorWorld={complete:true,hasGeometry:true,everDetected:false,entries:new Map(),canOccupy:point=>point.toArray().every(Number.isFinite),constrainMove:(_from,to)=>to.clone(),groundSupport(point,down){const y=ar.groundY??(ar.floorSpace?0:ar.anchor?.y);return Number.isFinite(y)&&point.y>=y-.035&&point.y-y<=down?{point:point.clone().setY(y),normal:new THREE.Vector3(0,1,0),semanticLabel:'floor'}:null;},clearStandingPoint:point=>point.clone()};}
     return this.floorWorld;
   }
+  /** Finger curl 0..1 per finger: XRHand joint bends when hands are tracked, otherwise trigger (index), grip (other fingers) and thumb touch. */
+  fingerCurl(frame,space,input){
+    const curl={thumb:.1,index:.15,middle:.15,ring:.15,pinky:.15};if(!input)return curl;
+    if(input.hand&&frame.getJointPose){
+      const joint=name=>{try{const jointSpace=input.hand.get(name),p=jointSpace&&frame.getJointPose(jointSpace,space)?.transform?.position;return p&&[p.x,p.y,p.z].every(Number.isFinite)?new THREE.Vector3(p.x,p.y,p.z):null;}catch{return null;}};
+      const bend=(names,full)=>{const points=names.map(joint);if(points.some(point=>!point))return null;let total=0;for(let i=1;i<points.length-1;i++){const a=points[i].clone().sub(points[i-1]),b=points[i+1].clone().sub(points[i]);if(a.lengthSq()>1e-10&&b.lengthSq()>1e-10)total+=a.angleTo(b);}return THREE.MathUtils.clamp((total-.12)/full,0,1);};
+      const thumb=bend(['thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip'],1.3);if(thumb!==null)curl.thumb=thumb;
+      for(const finger of ['index','middle','ring','pinky']){const value=bend(['metacarpal','phalanx-proximal','phalanx-intermediate','phalanx-distal','tip'].map(part=>finger+'-finger-'+part),3.4);if(value!==null)curl[finger]=value;}
+      return curl;
+    }
+    const buttons=input.gamepad?.buttons||[],value=index=>THREE.MathUtils.clamp(buttons[index]?.value??(buttons[index]?.pressed?1:0),0,1);
+    curl.index=Math.max(buttons[0]?.touched?.3:.15,value(0));
+    curl.middle=curl.ring=curl.pinky=Math.max(.15,value(1));
+    curl.thumb=[3,4,5,6].some(index=>buttons[index]?.touched||buttons[index]?.pressed)?.65:.1;
+    return curl;
+  }
   updatePuppet(frame,space,headPose,tracked,elapsed){
     if(this.behavior!=='puppet'||!this.canMove()||this.trackingPaused||this.panelInputs?.size||this.jumpState||this.flightMode||this.crawlMode||['crouch','stretch'].includes(this.direct)){this.puppetCalibrationRequested=false;this.owner.setPuppetTargets?.(null);return;}
     const rigid=transform=>{if(!transform)return null;const matrix=transform.matrix;if(matrix?.length===16&&Array.from(matrix).every(Number.isFinite)){const m=new THREE.Matrix4().fromArray(matrix),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3();m.decompose(position,quaternion,scale);if([position.x,position.y,position.z,...quaternion.toArray()].every(Number.isFinite)&&quaternion.lengthSq()>.5)return{position,quaternion:quaternion.normalize()};}const p=transform.position,q=transform.orientation;if(p&&q&&[p.x,p.y,p.z,q.x,q.y,q.z,q.w].every(Number.isFinite)){const quaternion=new THREE.Quaternion(q.x,q.y,q.z,q.w);if(quaternion.lengthSq()>.5)return{position:new THREE.Vector3(p.x,p.y,p.z),quaternion:quaternion.normalize()};}return null;};
     const sample={head:rigid(headPose?.transform)};
-    for(const name of ['leftHand','rightHand']){const hand=name==='leftHand'?'left':'right',input=tracked.find(row=>row.handedness===hand&&row.gripSpace);try{sample[name]=input&&rigid(frame.getPose(input.gripSpace,space)?.transform);}catch{sample[name]=null;}}
+    for(const name of ['leftHand','rightHand']){const hand=name==='leftHand'?'left':'right',input=tracked.find(row=>row.handedness===hand&&row.gripSpace);try{sample[name]=input&&rigid(frame.getPose(input.gripSpace,space)?.transform);}catch{sample[name]=null;}sample[name+'Curl']=this.fingerCurl(frame,space,input);}
     if(!sample.head||!sample.leftHand||!sample.rightHand){this.puppetCalibrationRequested=false;this.owner.setPuppetTargets?.(null);this.companionStatus='Puppet paused · track your headset and both controllers.';return;}
     if(this.puppetCalibration?.reference.signature!==this.owner.idleSignature)this.puppetCalibration=null;
     if(!this.puppetCalibration){
@@ -81,15 +97,17 @@ export class AvatarAR {
       const span=sample.leftHand.position.distanceTo(sample.rightHand.position),level=Math.abs(sample.leftHand.position.y-sample.rightHand.position.y),forward=headForward.clone().normalize(),tpose=[sample.leftHand,sample.rightHand].every(hand=>{const delta=hand.position.clone().sub(sample.head.position);return Math.hypot(delta.x,delta.z)>.28*height&&Math.abs(delta.dot(forward))<.25*height&&delta.y>-.35*height&&delta.y<.1*height;});
       if(!reference||headForward.lengthSq()<.01||height<.6||height>2.4||!Number.isFinite(reference.height)||reference.height<.4||!tpose||span<.65*height||level>.15*height){this.owner.setPuppetTargets?.(null);this.companionStatus='Calibration needs a T-pose: arms sideways at shoulder height. Release and press both thumbsticks again.';return;}
       const basis=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.atan2(headForward.x,headForward.z));this.puppetCalibration={reference,neutral:sample,basis,inverse:basis.clone().invert(),origin:sample.head.position.clone(),scale:reference.height/height};
+      // Hands move by arm-span ratio, not height ratio: the Robot's short arms otherwise overshoot and cross when your hands meet.
+      const avatarSpan=(reference.leftHand.palm||reference.leftHand.position).distanceTo(reference.rightHand.palm||reference.rightHand.position);if(Number.isFinite(avatarSpan)&&avatarSpan>.1)this.puppetCalibration.handScale=avatarSpan/span;
     }
     const c=this.puppetCalibration,travel=sample.head.position.clone().sub(c.origin).setY(0);
     // Recenter physical room walking without turning the calibrated hand frame with head gaze.
     if(travel.length()>.25){c.origin.addScaledVector(travel.clone().addScaledVector(travel.clone().normalize(),-.15),1-Math.exp(-8*elapsed));const remaining=sample.head.position.clone().sub(c.origin).setY(0);if(remaining.length()>.35)c.origin.addScaledVector(remaining.clone().addScaledVector(remaining.clone().normalize(),-.35),1);}
     const recenter=c.origin.clone().sub(c.neutral.head.position).setY(0),mirrored=this.ui.mirror?.checked!==false,targets={weight:1};
-    for(const name of ['head','leftHand','rightHand']){const source=mirrored&&name!=='head'?name==='leftHand'?'rightHand':'leftHand':name;const delta=sample[source].position.clone().sub(c.neutral[source].position).sub(recenter).applyQuaternion(c.inverse).multiplyScalar(c.scale),grip=c.reference[name].grip;
+    for(const name of ['head','leftHand','rightHand']){const source=mirrored&&name!=='head'?name==='leftHand'?'rightHand':'leftHand':name;const delta=sample[source].position.clone().sub(c.neutral[source].position).sub(recenter).applyQuaternion(c.inverse).multiplyScalar(name==='head'?c.scale:c.handScale||c.scale),grip=c.reference[name].grip;
         // Hands use the absolute WebXR grip frame, so calibration palms (forward or down) cannot offset the wrist.
         let quaternion=grip?c.inverse.clone().multiply(sample[source].quaternion):c.inverse.clone().multiply(sample[source].quaternion.clone().multiply(c.neutral[source].quaternion.clone().invert())).multiply(c.basis);
-        if(mirrored){delta.x*=-1;quaternion.y*=-1;quaternion.z*=-1;}if(grip)quaternion.multiply(grip.clone().invert());quaternion.normalize();if(name==='head'&&delta.length()>.3)delta.setLength(.3);targets[name]={position:c.reference[name].position.clone().add(delta),quaternion};}
+        if(mirrored){delta.x*=-1;quaternion.y*=-1;quaternion.z*=-1;}if(grip)quaternion.multiply(grip.clone().invert());quaternion.normalize();if(name==='head'&&delta.length()>.3)delta.setLength(.3);const palm=name!=='head'&&c.reference[name].palm;targets[name]={position:(palm||c.reference[name].position).clone().add(delta),quaternion,palm:!!palm,curl:sample[source+'Curl']};}
     this.owner.setPuppetTargets?.(targets);this.companionStatus=mirrored?'Puppet · mirrored headset and hands':'Puppet · direct headset and hands';
   }
   message(text) { this.ui.status.hidden = false; this.ui.status.textContent = text; if (this.session && this.headset) { this.runtimeError = text; } }
@@ -109,7 +127,7 @@ export class AvatarAR {
     try {
       this.depthRequested = this.performance().occlusion === 'depth';
       const depth = this.depthRequested ? { optionalFeatures: ['depth-sensing'], depthSensing: { usagePreference: ['gpu-optimized'], dataFormatPreference: ['unsigned-short', 'float32', 'luminance-alpha'] } } : { optionalFeatures: [] };
-      let session; try { session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay', 'mesh-detection', 'plane-detection', ...depth.optionalFeatures], ...(depth.depthSensing ? { depthSensing: depth.depthSensing } : {}), domOverlay: { root: this.ui.overlay } }); } catch (error) { if (error.name !== 'NotSupportedError') throw error; session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'], domOverlay: { root: this.ui.overlay } }); }
+      let session; try { session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay', 'mesh-detection', 'plane-detection', 'hand-tracking', ...depth.optionalFeatures], ...(depth.depthSensing ? { depthSensing: depth.depthSensing } : {}), domOverlay: { root: this.ui.overlay } }); } catch (error) { if (error.name !== 'NotSupportedError') throw error; session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'], domOverlay: { root: this.ui.overlay } }); }
       this.world = new XRWorld(this.vrSupported ? null : scene); this.panelStarted = false;
       this.session = session; this.placed = false; this.walkMode = false; this.chooseSeat = false; this.headset = !!this.vrSupported || /Quest|Oculus/i.test(navigator.userAgent); if (this.ui.overlay.dataset) this.ui.overlay.dataset.headset = String(this.headset);
       this.saved = { position: group.position.clone(), quaternion: group.quaternion.clone(), scale: group.scale.clone(), visible: group.visible, background: scene.background, clearAlpha: renderer.getClearAlpha(), cameraPosition: camera.position.clone(), cameraQuaternion: camera.quaternion.clone(), target: controls.target.clone(), controlsEnabled: controls.enabled, xrEnabled: renderer.xr.enabled, shadowsEnabled: renderer.shadowMap.enabled, shadowType: renderer.shadowMap.type, casters: new Map() };
