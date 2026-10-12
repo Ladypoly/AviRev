@@ -4,6 +4,31 @@ import { MeshBVH, CENTER } from './libs/three-mesh-bvh/index.module.mjs';
 // Scanned floors are bumpy (about ±1.5 cm); body volumes start this high so scan noise, rug edges and thresholds never block.
 const STEP_HEIGHT = .04;
 const MAX_TRIANGLES = 250000, MAX_ENTRIES = 128, MAX_VERTICES = 200000, MAX_ROOM_VERTICES = 400000;
+// Quest's mesh detection returns the Space Setup furniture boxes as meshes too; only the dense room scan ('global mesh') is the scan.
+const WINDOW = /window/i;
+/** Window frames lying in this plane (within 6 cm, any facing), as 2D holes in the plane's local XZ, rounded to 1 cm. */
+function windowHoles(plane, windows) {
+  const holes = [], point = new THREE.Vector3();
+  for (const frame of windows) {
+    if (frame === plane || !frame.positions) continue;
+    const hole = [];
+    for (let i = 0; i < frame.positions.length; i += 3) { point.fromArray(frame.positions, i).applyMatrix4(frame.matrix).applyMatrix4(plane.inverse); if (Math.abs(point.y) > .06) { hole.length = 0; break; } hole.push([Math.round(point.x * 100) / 100, Math.round(point.z * 100) / 100]); }
+    if (hole.length >= 3) holes.push(hole);
+  }
+  return holes;
+}
+/** The plane polygon with window holes, triangulated; falls back to the full plane when a hole leaves the wall or overlaps another. */
+function cutPlane(positions, holes) {
+  const contour = []; for (let i = 0; i < positions.length; i += 3) contour.push(new THREE.Vector2(positions[i], positions[i + 2]));
+  const area = points => Math.abs(THREE.ShapeUtils.area(points)), inside = (p, polygon) => { let hit = false; for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) { const a = polygon[i], b = polygon[j]; if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) hit = !hit; } return hit; };
+  const usable = holes.map(hole => hole.map(([x, z]) => new THREE.Vector2(x, z))).filter(hole => hole.every(p => inside(p, contour)));
+  if (!usable.length) return null;
+  const points = contour.concat(...usable), indices = THREE.ShapeUtils.triangulateShape(contour, usable).flat();
+  let covered = 0; for (let i = 0; i < indices.length; i += 3) covered += Math.abs(THREE.ShapeUtils.area([points[indices[i]], points[indices[i + 1]], points[indices[i + 2]]]));
+  if (!indices.length || Math.abs(covered - (area(contour) - usable.reduce((sum, hole) => sum + area(hole), 0))) > .01 * area(contour)) return null;
+  const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(points.flatMap(p => [p.x, 0, p.y])), 3)); geometry.setIndex(indices); return geometry;
+}
+export const occlusionGroup = entry => entry.kind === 'mesh' && (/global/i.test(entry.label || '') || entry.triangles > 2000) ? 'scan' : 'setup';
 const semanticPriority=label=>/^(table|chair|couch|sofa|bed|desk|cabinet|shelf)$/i.test(label||'')?2:label?1:0;
 const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), closest = new THREE.Vector3(), triangle = new THREE.Triangle();
 function segmentDistance(p, q, r, s, normal = null) {
@@ -59,7 +84,7 @@ export class XRWorld {
     this.occluders = scene ? new THREE.Group() : null;
     this.occlusionMaterial = scene ? new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: true, depthTest: true, blending: THREE.NoBlending, toneMapped: false }) : null;
     // Changing the occlusion source briefly tints the surfaces in use (blue room setup, orange scan) so people can see what hides the avatar.
-    this.highlight = scene ? { plane: new THREE.MeshBasicMaterial({ color: 0x5b8cff, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }), mesh: new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }) } : null; this.highlightUntil = 0;
+    this.highlight = scene ? { setup: new THREE.MeshBasicMaterial({ color: 0x5b8cff, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }), scan: new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }) } : null; this.highlightUntil = 0;
     if (this.occluders) { this.occluders.visible = false; this.occluders.renderOrder = -1000; scene.add(this.occluders); }
     // shortcut: Scanned room surfaces cannot occlude moving hands or unscanned objects; upgrade when per-eye depth sensing is supported correctly.
     this.entries = new Map(); this.detectedKinds = new Set(); this.everDetected = false; this.statusText = 'Room scan unavailable · floor fallback, no obstacle collision'; this.complete = true; this.totalTriangles = 0; }
@@ -117,27 +142,30 @@ export class XRWorld {
     else this.statusText = meshes || planes ? 'No usable scanned surfaces - floor fallback, no obstacle collision' : 'Room scan unavailable - floor fallback, no obstacle collision';
     if(this.skippedEmpty||this.duplicateSurfaces)this.statusText+=' - '+this.skippedEmpty+' empty, '+this.duplicateSurfaces+' duplicate sources skipped';
     this.updateOcclusion();
-    const occluding = this.occluding || { mesh: 0, plane: 0 };
-    this.occlusionText = this.occluders && this.occlusionKinds && !this.occlusionKinds.size ? 'room occlusion off' : this.occluders && occluding.mesh + occluding.plane ? 'occluding ' + [occluding.plane && occluding.plane + ' setup', occluding.mesh && occluding.mesh + ' scan'].filter(Boolean).join(' + ') : 'room occlusion unavailable';
+    const occluding = this.occluding || { setup: 0, scan: 0 };
+    this.occlusionText = this.occluders && this.occlusionKinds && !this.occlusionKinds.size ? 'room occlusion off' : this.occluders && occluding.setup + occluding.scan ? 'occluding ' + [occluding.setup && occluding.setup + ' setup', occluding.scan && occluding.scan + ' scan'].filter(Boolean).join(' + ') + (this.openWindows ? ', ' + this.openWindows + (this.openWindows === 1 ? ' window' : ' windows') + ' open' : '') : 'room occlusion unavailable';
     this.statusText += ' · ' + this.occlusionText;
     return this.statusText;
   }
-  removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } }
+  removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } if (entry?.cutGeometry) { entry.cutGeometry.dispose(); entry.cutGeometry = null; } if (entry) entry.holeKey = ''; }
   flash(seconds = 3) { this.highlightUntil = performance.now() + seconds * 1000; this.updateOcclusion(); }
   updateOcclusion() {
     if (!this.occluders) return;
     const flashing = !!this.highlight && performance.now() < this.highlightUntil;
     // Each posed surface occludes on its own; an incomplete scan pauses movement but must not switch occlusion off (that made every source look identical).
     this.occluders.visible = (!this.occlusionKinds || this.occlusionKinds.size > 0) && this.hasGeometry;
-    this.occluding = { mesh: 0, plane: 0 };
+    this.occluding = { setup: 0, scan: 0 }; this.openWindows = 0;
+    // Space Setup window frames never occlude, and each wall's occluder has its windows cut out, so the avatar shows through windows (collision keeps the full wall).
+    const windows = [...this.entries.values()].filter(entry => entry.active && entry.kind === 'plane' && WINDOW.test(entry.label || ''));
     for (const entry of this.entries.values()) {
-      const shown = entry.active && (!this.occlusionKinds || this.occlusionKinds.has(entry.kind));
-      if (shown && this.occluders.visible) this.occluding[entry.kind]++;
+      const group = occlusionGroup(entry), shown = entry.active && !WINDOW.test(entry.label || '') && (!this.occlusionKinds || this.occlusionKinds.has(group));
+      if (shown && this.occluders.visible) this.occluding[group]++;
+      if (shown && entry.kind === 'plane' && entry.positions) { const holes = windowHoles(entry, windows), key = JSON.stringify(holes); if (key !== (entry.holeKey || '[]')) { entry.cutGeometry?.dispose(); entry.cutGeometry = holes.length ? cutPlane(entry.positions, holes) : null; entry.holeKey = key; if (entry.occluder) entry.occluder.geometry = entry.cutGeometry || entry.geometry; } if (entry.cutGeometry) this.openWindows += holes.length; }
       if (this.occluders.visible && shown && !entry.occluder) {
-        entry.occluder = new THREE.Mesh(entry.geometry, this.occlusionMaterial);
+        entry.occluder = new THREE.Mesh(entry.cutGeometry || entry.geometry, this.occlusionMaterial);
         entry.occluder.matrixAutoUpdate = false; entry.occluder.renderOrder = -1000; this.occluders.add(entry.occluder);
       }
-      if (entry.occluder) { entry.occluder.material = flashing ? this.highlight[entry.kind] : this.occlusionMaterial; entry.occluder.renderOrder = flashing ? 1 : -1000; entry.occluder.visible = this.occluders.visible && shown; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
+      if (entry.occluder) { entry.occluder.material = flashing ? this.highlight[group] : this.occlusionMaterial; entry.occluder.renderOrder = flashing ? 1 : -1000; entry.occluder.visible = this.occluders.visible && shown; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
     }
   }
   raycast(origin, direction, maxDistance = 4) {

@@ -11,7 +11,7 @@ const HELP = {
   'ar-run-mode':'Click to toggle: press the left thumbstick once to run, again to walk. Hold to run: keep it pressed while moving.',
   'ar-quality':'Sharp renders full resolution. Balanced and Fast lower resolution and blur the view edges for a higher frame rate. Resolution changes the next time you enter WebXR; edge blur changes now.',
   'ar-animation-rate':'Every 2nd frame halves avatar animation work. Movement speed stays the same; motion looks slightly less smooth.',
-  'ar-occlusion':'What hides the avatar behind real things. Room setup uses the walls and furniture boxes from Quest Space Setup; Scanned mesh uses the detailed room scan; Live depth uses the headset depth sensor every frame, so hands and moving objects occlude too (starts the next time you enter WebXR, costs GPU). Off saves GPU time.',
+  'ar-occlusion':'What hides the avatar behind real things. Room setup uses the walls, floor and furniture boxes from Quest Space Setup; Scanned mesh uses only the detailed room scan; Live depth uses the headset depth sensor every frame, so hands and moving objects occlude too (starts the next time you enter WebXR, costs GPU). Off saves GPU time.',
   'ar-shadows':'The soft floor shadow under the avatar. Turning it off saves a shadow render every frame.',
   'ar-crawl':'Enter or leave crawling. Move with the left stick; right stick turns. Standing again needs clear space above the avatar.',
   'ar-fly':'Double jump (A, then A again in the air) or hold right-stick forward in the stretch pose for 1 second to fly; a ring at the avatar feet fills while you hold. Keep it forward to rise; pull back to descend. Near the floor, hold back for 1 second to land. Left stick moves and strafes; right stick left/right turns.',
@@ -306,7 +306,7 @@ export class XRConfiguratorPanel {
   drawWrist() {
     if(!this.wristCanvas)return;
     // The wrist menu: show/hide the creator panel, reposition, and the three scene switches people change most.
-    const scene=this.bridge.snapshot('scene'),rows=new Map((scene.controls||[]).map(row=>[row.key,row])),occlusionState=((scene.roomStatus||'').match(/occluding [^\u00b7]+|room occlusion [a-z]+|live depth [^\u00b7]+/)||['waiting for room data'])[0].trim(),reposition=rows.get('ar-reposition'),behavior=rows.get('ar-behavior'),collision=rows.get('ar-collision'),occlusion=rows.get('ar-occlusion');
+    const scene=this.bridge.snapshot('scene'),rows=new Map((scene.controls||[]).map(row=>[row.key,row])),status=scene.roomStatus||'',occlusionState=((status.match(/live depth [^\u00b7]+/)||status.match(/occluding [^\u00b7]+|room occlusion [a-z]+/)||['waiting for room data'])[0]).trim(),reposition=rows.get('ar-reposition'),behavior=rows.get('ar-behavior'),collision=rows.get('ar-collision'),occlusion=rows.get('ar-occlusion');
     const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled,behavior?.value,collision?.value,occlusion?.value,occlusionState]);if(signature===this.wristSignature)return;this.wristSignature=signature;
     const ctx=this.wristCanvas.getContext('2d'),scale=512/480;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,512,512);ctx.setTransform(scale,0,0,scale,0,0);
     this.shape(ctx,4,4,472,472,36,C.ground,C.line,3);

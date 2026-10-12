@@ -1,6 +1,6 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { AvatarMovementMotor } from './builder-movement.mjs?v=e772e5919b76';
-import { XRWorld } from './builder-xr-world.mjs?v=eedea3131e01';
+import { XRWorld } from './builder-xr-world.mjs?v=08d2b791ea59';
 import { AvatarFollower } from './builder-follow.mjs?v=9cb113ed3702';
 
 export function floorCandidate(matrix, viewer, floorY = null) {
@@ -19,7 +19,8 @@ const HOLD=1;
 // Occlusion sources: Quest room setup planes, the scanned room mesh, both, or live per-frame depth (needs a new session).
 // Full-stick avatar turn speed in rad/s (doubled from 1.8 on 2026-10-12: turning felt slow).
 const TURN_RATE=3.6;
-const OCCLUSION={off:[],planes:['plane'],mesh:['mesh'],both:['mesh','plane'],depth:[]};
+// Occluder groups (see occlusionGroup): 'setup' = Space Setup walls, floor and furniture boxes; 'scan' = the dense room scan.
+const OCCLUSION={off:[],planes:['setup'],mesh:['scan'],both:['setup','scan'],depth:[]};
 // Resolution is fixed per WebXR session; foveation, shadows, occlusion and animation rate change live.
 const QUALITY={sharp:{scale:1,foveation:.3,shadowMap:1024},balanced:{scale:.85,foveation:.7,shadowMap:1024},fast:{scale:.7,foveation:1,shadowMap:512}};
 
@@ -396,7 +397,7 @@ export class AvatarAR {
     // Frame rate is reported once per second so the status text does not force panel redraws every frame.
     if(elapsed>0){this.frameTimes=(this.frameTimes||0)+elapsed;this.frameCount=(this.frameCount||0)+1;if(this.frameTimes>=1){this.fps=Math.round(this.frameCount/this.frameTimes);this.frameTimes=this.frameCount=0;}}
     this.world?.update(frame,space);const occlusion=this.performance().occlusion,depthMesh=this.owner.renderer.xr.getDepthSensingMesh?.();if(depthMesh)depthMesh.visible=occlusion==='depth';
-    const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored'+(occlusion!=='depth'&&this.world?.occlusionText?' · '+this.world.occlusionText:''):this.world?.statusText||'')+(occlusion==='depth'?this.depthActive?' · live depth occlusion':' · live depth after re-entry':'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
+    const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored'+(occlusion!=='depth'&&this.world?.occlusionText?' · '+this.world.occlusionText:''):this.world?.statusText||'')+(occlusion==='depth'?this.depthActive?' · live depth on (experimental)':this.depthRequested?' · live depth unavailable here':' · live depth after re-entry':'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
     const inputs = [...(this.session.inputSources || [])], tracked = inputs.filter(input => input.targetRayMode === 'tracked-pointer');
     if (inputs.some(input => input.targetRayMode !== 'screen')) this.headset = true;
     if (this.headset && this.ui.panel && !this.panelStarted) { this.ui.panel.start({session:this.session,scene:this.owner.scene,renderer:this.owner.renderer,avatar:this.owner}); this.panelStarted=true; }

@@ -4,7 +4,18 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `349e567bdd44` (12 October 2026, seventh release of the day): [Release 349e567bdd44](#release-349e567bdd44) on top of `053d731dba5e`. Its 7 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page flew a winged Robot without console errors.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `d54e9e489a51` (12 October 2026, eighth release of the day): [Release d54e9e489a51](#release-d54e9e489a51) on top of `349e567bdd44`. Its 5 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live wrist menu switched mode, collision and occlusion in headless Edge.
+
+## Release d54e9e489a51
+
+- **Occlusion groups:** Quest mesh detection returns Space Setup furniture boxes as meshes too. `occlusionGroup` now sorts by label: `global mesh` (or >2000 triangles) is **scan**, everything else (walls, floor, furniture boxes) is **setup**. Room setup = setup, Scanned mesh = scan only, Setup + scan = both.
+- **Windows open in Room setup:** `window frame` planes never occlude, and each wall plane's occluder is re-triangulated with coplanar (≤ 6 cm) windows as holes (`windowHoles`/`cutPlane`, area-checked, falls back to the whole wall). Collision and raycasts keep the full wall. Status shows "N windows open". The dense scan still covers windows in Scanned mesh / Setup + scan.
+- **Live depth is labelled experimental.** Finding: three.js copies Quest's gpu-optimized depth texture straight into `gl_FragDepth` per eye without the depth camera's reprojection (`normDepthBufferFromNormView`), so it hides nothing useful. The real fix is per-fragment depth testing in the avatar shader after reprojecting sensor depth into each view (Meta sample approach); not started, needs headset iteration.
+- `tests/xr-occlusion.mjs` (in `npm test`): groups, window cut (10 m² wall → 9 m² occluder), full-wall collision, Off/Scan/Setup visibility, off-plane window ignored.
+
+## Release 349e567bdd44
+
+Released on top of `053d731dba5e`. Its 7 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page flew a winged Robot without console errors.
 
 ## Release 349e567bdd44
 
