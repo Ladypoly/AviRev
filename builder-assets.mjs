@@ -1,7 +1,7 @@
 const base = new URL('./', import.meta.url);
 let delivery;
 async function manifest() {
-  if (!delivery) delivery = fetch(new URL('delivery-manifest.json', base)).then(async response => response.ok ? response.json() : {}).catch(() => ({}));
+  if (!delivery) delivery = fetch(new URL('delivery-manifest.json?v=a4f9e1707ef7', base)).then(async response => response.ok ? response.json() : {}).catch(() => ({}));
   return delivery;
 }
 export async function assetBytes(path) {

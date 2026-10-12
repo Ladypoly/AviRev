@@ -1,0 +1,8 @@
+{
+  "package": "three-mesh-bvh",
+  "version": "0.9.15",
+  "registry": "https://registry.npmjs.org/three-mesh-bvh/-/three-mesh-bvh-0.9.15.tgz",
+  "integrity": "sha512-9xdEDkCzFoT8VPFH9DznwFSdbaIEjMvM106Iqq7TJurrIheUKDcdW4prfJTCxryih4XS/UxWs0H3K4MLMRFyOQ==",
+  "license": "MIT",
+  "changes": "Local Three import path; source map reference removed; no package scripts run."
+}

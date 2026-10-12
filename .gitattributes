@@ -1,2 +1,11 @@
+* -text
+README.md text eol=lf
+docs/*.md text eol=lf
+tools/*.py text eol=lf
 *.bin binary
 *.webp binary
+
+.gitattributes text eol=lf
+.gitignore text eol=lf
+package.json text eol=lf
+tests/*.mjs text eol=lf

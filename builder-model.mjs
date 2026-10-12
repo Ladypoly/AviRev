@@ -105,7 +105,7 @@ export function resolve(config, family, data, authoring = false) {
     if (chosen.get('robot.wings')?.Ordinal > 0 && (family.meshes || []).some(mesh => mesh.name === 'RobotWingMount')) names.push('RobotWingMount');
   }
   const colours = Object.fromEntries(config.Colours.map(row => [row.SlotId, row.Hex]));
-  if (config.Family === 'human') { colours['hair.base'] ??= '#33251c'; colours.eye ??= '#2e6b3f'; colours['hair.tip'] ??= colours['hair.base']; colours.beard ??= colours['hair.base']; for (const slot of ['lips', 'nails']) if (!colours[slot] && colours.skin) colours[slot] = '#' + colours.skin.slice(1).match(/../g).map(value => Math.round(parseInt(value, 16) * .5).toString(16).padStart(2, '0')).join(''); }
+  if (config.Family === 'human') { colours.skin ??= '#e9bfae'; colours['hair.base'] ??= '#33251c'; colours.eye ??= '#2e6b3f'; colours['hair.tip'] ??= colours['hair.base']; colours.beard ??= colours['hair.base']; for (const slot of ['lips', 'nails']) if (!colours[slot] && colours.skin) colours[slot] = '#' + colours.skin.slice(1).match(/../g).map(value => Math.round(parseInt(value, 16) * .5).toString(16).padStart(2, '0')).join(''); }
   const materialFloats = {}, materialTextures = {};
   const colourValues = Object.fromEntries(Object.entries(colours).map(([name, hex]) => [name, [...hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255), 1]]));
   if (config.Family === 'human') for (const slot of ['lips','nails']) if (!config.Colours.some(row => row.SlotId === slot) && colourValues.skin) colourValues[slot] = [...colourValues.skin.slice(0,3).map(value => value * .5), 1];

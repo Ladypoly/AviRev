@@ -1,0 +1,8 @@
+{
+  "name": "avirev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/xr-controls.mjs"
+  }
+}

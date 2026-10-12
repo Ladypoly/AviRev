@@ -3,6 +3,13 @@ const point = matrix => new THREE.Vector3().setFromMatrixPosition(matrix);
 const up = new THREE.Vector3(0, 1, 0);
 const reflection = new THREE.Matrix4().makeScale(-1, 1, 1);
 function posed(rest, position, alignment) { const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); rest.decompose(p, q, s); if (alignment) q.premultiply(alignment); return new THREE.Matrix4().compose(position, q, s); }
+/** Standing knees follow toe yaw, not the lateral gap between an animated knee and its planted foot. */
+export function standingKneePole(direction, toeOut) {
+  const pole = new THREE.Vector3(0, 0, 1).applyAxisAngle(up, THREE.MathUtils.degToRad(toeOut));
+  pole.addScaledVector(direction, -pole.dot(direction));
+  if (pole.lengthSq() < 1e-10) pole.copy(up).addScaledVector(direction, -up.dot(direction));
+  return pole.normalize();
+}
 /** Static standing solve, using imported rest chains. Live ground/tracking targets are separate. */
 export function postureMatrices(family, config) {
   const rest = new Map(family.skeleton.map(bone => [bone.path, new THREE.Matrix4().fromArray(bone.matrix)])), parents = new Map(family.skeleton.map(bone => [bone.path, bone.parent])), overrides = new Map(), legs = [];
@@ -16,9 +23,7 @@ export function postureMatrices(family, config) {
     const direction = target.clone().sub(a), requestedDistance = direction.length(); direction.normalize();
     const distance = Math.max(Math.abs(firstLength - secondLength) + 1e-6, Math.min(firstLength + secondLength - 1e-6, requestedDistance));
     const endpoint = a.clone().addScaledVector(direction, distance);
-    let pole = b.clone().sub(a).addScaledVector(direction, -b.clone().sub(a).dot(direction)); if (pole.lengthSq() < 1e-10) pole = new THREE.Vector3(0, 0, -1).addScaledVector(direction, direction.z); pole.normalize();
-    // FootPlacer rotates its upright foot BASE, whose up differs from the imported foot bone's length axis.
-    pole.applyAxisAngle(up, THREE.MathUtils.degToRad(sign * config.ToeOut)); pole.addScaledVector(direction, -pole.dot(direction)).normalize();
+    const pole = standingKneePole(direction, sign * (config.ToeOut || 0));
     const along = (firstLength * firstLength - secondLength * secondLength + distance * distance) / (2 * distance), height = Math.sqrt(Math.max(0, firstLength * firstLength - along * along));
     const knee = a.clone().addScaledVector(direction, along).addScaledVector(pole, height);
     const upperTurn = new THREE.Quaternion().setFromUnitVectors(b.clone().sub(a).normalize(), knee.clone().sub(a).normalize()), lowerTurn = new THREE.Quaternion().setFromUnitVectors(c.clone().sub(b).normalize(), endpoint.clone().sub(knee).normalize());

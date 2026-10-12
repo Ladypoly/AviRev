@@ -1,4 +1,4 @@
-import { surfaceProfiles } from './builder-surface-profiles.mjs';
+import { surfaceProfiles } from './builder-surface-profiles.mjs?v=62c5d9ac114c';
 
 export function surfaceProfile(definition) {
   const keyword = (definition.keywords || []).find(value => /^_PROFILE_\d+$/.test(value));
@@ -11,7 +11,9 @@ export function sampledTextureProperties(definition) {
     if (!(profile in surfaceProfiles)) throw new Error(`Missing surface profile for ${definition.name}.`);
     // This immutable native material switch selects the one-texture hair path.
     if (profile === 24 && definition.properties?._Param1?.[2] > .5) return ['_Map2'];
-    return [...new Set(surfaceProfiles[profile].match(/\b_Map\d+\b/g) || [])];
+    const sampled = [...new Set(surfaceProfiles[profile].match(/\b_Map\d+\b/g) || [])];
+    if ((profile === 0 || profile === 24) && definition.properties?._SubsurfaceStrength > 0 && definition.textures?._ThicknessMap) sampled.push('_ThicknessMap');
+    return sampled;
   }
   if (shader === 'Robot') return ['_Mask', '_BaseMap'];
   if (shader === 'Robot/Face Glow Panel') return ['_FaceAtlas', '_MouthSilent', ...((definition.keywords || []).includes('_PANEL_MASK') ? ['_PanelDistance'] : [])];

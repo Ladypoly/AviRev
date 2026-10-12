@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { surfaceProfiles } from './builder-surface-profiles.mjs';
-import { robotFaceGLSL, robotFaceUniforms } from './builder-robot-face.mjs';
-import { assetBytes, assetPath, cachedLoad } from './builder-assets.mjs';
-import { surfaceProfile, sampledTextureUniforms } from './builder-texture-bindings.mjs';
+import { surfaceProfiles } from './builder-surface-profiles.mjs?v=62c5d9ac114c';
+import { robotFaceGLSL, robotFaceUniforms } from './builder-robot-face.mjs?v=bceb42ed921f';
+import { assetBytes, assetPath, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
+import { surfaceProfile, sampledTextureUniforms } from './builder-texture-bindings.mjs?v=648ace8649fe';
 
 const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.needsUpdate = true;
 const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1); flatNormal.needsUpdate = true;
@@ -58,6 +58,7 @@ export async function createMaterial(definition, family, report) {
   if (shaderName.includes('Masked PBR')) {
     const profile = surfaceProfile(definition);
     if (!(profile in surfaceProfiles)) throw new Error(`Missing surface profile for ${definition.name}.`);
+    const scattering = (profile === 0 || profile === 24) && properties._SubsurfaceStrength > 0 && !!definition.textures?._ThicknessMap;
     material = new THREE.MeshStandardMaterial({ side, normalMap: flatNormal, roughness: .7 });
     const declarations = [...Array.from({ length: 10 }, (_, i) => `uniform sampler2D _Map${i};`), ...Array.from({ length: 12 }, (_, i) => `uniform vec4 _Param${i};`), ...Array.from({ length: 7 }, (_, i) => `uniform vec4 _Tint${i};`), 'uniform float _Cutoff;'].join('\n');
     material.onBeforeCompile = shader => {
@@ -66,8 +67,16 @@ export async function createMaterial(definition, family, report) {
       shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', 'AvatarSurface avatarSurface=readAvatarSurface();diffuseColor.rgb=avatarSurface.albedo;diffuseColor.a=avatarSurface.alpha;if(diffuseColor.a<_Cutoff)discard;');
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '').replace('#include <roughnessmap_fragment>', 'float roughnessFactor=clamp(1.0-avatarSurface.smoothness,0.04,1.0);').replace('#include <metalnessmap_fragment>', 'float metalnessFactor=clamp(avatarSurface.metallic,0.0,1.0);');
       shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', 'normal=normalize(tbn*avatarSurface.normalTS);').replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance=avatarSurface.emission;').replace('#include <aomap_fragment>', 'reflectedLight.indirectDiffuse*=avatarSurface.occlusion;reflectedLight.indirectSpecular*=avatarSurface.occlusion;');
+      if (scattering) {
+        shader.fragmentShader = 'uniform sampler2D _ThicknessMap;uniform float _SubsurfaceStrength,_ThicknessInvert,_ThicknessPower;uniform vec4 _SubsurfaceColor;\n' + shader.fragmentShader;
+        const mask = profile === 0 ? 'texture2D(_Map1,vAvatarUv).r' : '(_Param0.z>.5 ? max(0.0,1.0-texture2D(_Map1,vAvatarUv).r-texture2D(_Map1,vAvatarUv).g)*(1.0-texture2D(_Map1,vAvatarUv).a) : 0.0)';
+        shader.fragmentShader = shader.fragmentShader.replace('AvatarSurface avatarSurface=readAvatarSurface();', `AvatarSurface avatarSurface=readAvatarSurface();float avatarThickness=mix(texture2D(_ThicknessMap,vAvatarUv).r,1.0-texture2D(_ThicknessMap,vAvatarUv).r,_ThicknessInvert);float avatarTransmission=pow(clamp(avatarThickness,0.0,1.0),_ThicknessPower)*_SubsurfaceStrength*${mask};`);
+        // Match the native thickness-masked light wrap and back scattering.
+        shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\nvec3 AvatarSkinScatter(IncidentLight light,vec3 n,vec3 view,vec3 albedo,float transmission,vec3 tint){float back=pow(clamp(dot(view,-normalize(light.direction+n*.25)),0.0,1.0),3.0);float wrap=max(0.0,clamp((dot(n,light.direction)+.35)/1.35,0.0,1.0)-clamp(dot(n,light.direction),0.0,1.0));return albedo*tint*light.color*(back+wrap*.35)*transmission;}`);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replaceAll('RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );', 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\nreflectedLight.directDiffuse+=AvatarSkinScatter(directLight,geometryNormal,geometryViewDir,avatarSurface.albedo,avatarTransmission,_SubsurfaceColor.rgb);'));
+      }
     };
-    material.customProgramCacheKey = () => `unity-masked-${profile}-${properties._Param1?.[3] || 0}`;
+    material.customProgramCacheKey = () => `unity-masked-${profile}-${properties._Param1?.[3] || 0}-${scattering}`;
   } else if (shaderName === 'Robot') {
     material = new THREE.MeshStandardMaterial({ side, roughness: 1 - (properties._Smoothness || .2) });
     for (const name of ['_PrimaryColor', '_SecondaryColor', '_GlowColor']) uniforms[name] ??= { value: new THREE.Vector4(1, 1, 1, 1) };
