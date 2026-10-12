@@ -3,7 +3,7 @@ import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFu
 import { OrbitControls } from './libs/three/package/examples/jsm/controls/OrbitControls.js';
 import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
 import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=7c5c6c7160c1';
-import { coverageFor, cullTriangles } from './builder-model.mjs?v=914e87b696d4';
+import { coverageFor, cullTriangles } from './builder-model.mjs?v=2776b8514534';
 import { postureMatrices, skinPosture } from './builder-posture.mjs?v=8f0df2f7d92d';
 
 const reflect = (source, size = 3) => { const value = Float32Array.from(source); for (let i = 0; i < value.length; i += size) value[i] *= -1; if (size === 4) for (let i = 3; i < value.length; i += 4) value[i] *= -1; return value; };
@@ -373,11 +373,16 @@ export class AvatarRenderer {
     const floor = box.min.y, pose = this.idlePlayer?.pose();
     const bone = names => { const row = this.currentFamily?.skeleton?.find(item => names.includes(item.name)), matrix = row && (pose?.get(row.path)?.elements || row.matrix); return matrix ? new THREE.Vector3(-matrix[12], matrix[13], matrix[14]) : null; };
     const measuredHead = bone(['head.x', 'Head']), height = standingHeight(measuredHead?.y, box.max.y), head = measuredHead || new THREE.Vector3(0, floor + height * .87, 0), eyes = bone(['c_eye.l', 'LeftEye']) || head.clone().add(new THREE.Vector3(0, height * .05, 0)), neck = bone(['neck.x', 'Neck']) || head.clone().add(new THREE.Vector3(0, -height * .05, 0));
-    let headTop = -Infinity; for (const item of this.active) { const positions = posedPositions(item); for (const vertex of item.headVertices) headTop = Math.max(headTop, positions[vertex * 3 + 1]); }
+    let headTop = -Infinity, headLeft = Infinity, headRight = -Infinity, headBack = Infinity, headFront = -Infinity; const point = new THREE.Vector3(); for (const item of this.active) { const positions = posedPositions(item), matrix = item.mesh.matrixWorld; for (const vertex of item.headVertices) { point.fromArray(positions, vertex * 3).applyMatrix4(matrix); headTop = Math.max(headTop, point.y); headLeft = Math.min(headLeft, point.x); headRight = Math.max(headRight, point.x); headBack = Math.min(headBack, point.z); headFront = Math.max(headFront, point.z); } }
     const framing = focusSlice(this.focusKind, height, floor, head.y, eyes.y, neck.y, Number.isFinite(headTop) ? headTop : box.max.y);
     if (this.focusKind === 'Body') { const size = box.getSize(new THREE.Vector3()); framing.center = box.getCenter(new THREE.Vector3()).y; framing.height = Math.max(framing.height, size.y * 1.1); framing.width = Math.max(framing.width, size.x, size.z); }
-    const center = new THREE.Vector3(0, framing.center, 0), slice = Math.max(framing.height, framing.width / this.camera.aspect);
-    center.y += framing.anchor * (framing.height - slice) / 2; this.controls.target.copy(center);
+    // Face/Head: keep the whole posed head (hair, helmet) in a narrow portrait mirror, also once the idle turns it to profile.
+    const headFocus = (this.focusKind === 'Face' || this.focusKind === 'Head') && Number.isFinite(headTop);
+    if (headFocus) framing.width = Math.max(framing.width, Math.max(headRight - headLeft, headFront - headBack) * 1.4);
+    const center = new THREE.Vector3(headFocus ? (headLeft + headRight) / 2 : 0, framing.center, 0), slice = Math.max(framing.height, framing.width / this.camera.aspect);
+    center.y += framing.anchor * (framing.height - slice) / 2;
+    if (headFocus) center.y = Math.max(center.y, headTop + height * .05 - slice / 2);
+    this.controls.target.copy(center);
     const distance = slice / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.08;
     const directions = { front: [0, .03, 1], threequarter: [.55, .08, 1], side: [1, .03, 0], back: [0, .03, -1] };
     this.camera.position.copy(center).add(new THREE.Vector3(...directions[view]).normalize().multiplyScalar(distance)); this.camera.near = Math.max(.001, distance / 1000); this.camera.far = distance * 100; this.camera.updateProjectionMatrix(); this.controls.update();

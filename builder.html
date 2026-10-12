@@ -1,36 +1,73 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AviRev — Avatar creator</title>
-<script src="review-access.js?v=3053575279ae"></script><link rel="stylesheet" href="builder.css?v=9bc6d09a19cd"><script type="importmap">{"imports":{"three":"./libs/three/package/build/three.module.js"}}</script><script type="module" src="builder.js?v=16b15af95ec5"></script></head>
+<script src="review-access.js?v=3053575279ae"></script><link rel="stylesheet" href="builder.css?v=16b31b4f6fd7"><script type="importmap">{"imports":{"three":"./libs/three/package/build/three.module.js"}}</script><script type="module" src="builder.js?v=6bd9b9bb07e3"></script></head>
 <body>
-<header class="builder-header"><a href="builder.html" class="brand">AviRev<span> / Workshop</span></a><nav aria-label="Review mode"><a href="index.html" data-review-link hidden>Asset review</a><a href="builder.html" aria-current="page">Avatar creator</a></nav><span id="preview-badge" class="preview-badge">Art preview · all unlocked</span></header>
-<main class="creator-shell">
-  <div class="builder-layout">
-    <aside class="creator-nav" aria-label="Avatar categories">
-      <div class="card-heading"><h1>Create your avatar</h1><p>Express yourself</p></div>
-      <div class="family-switch" role="group" aria-label="Avatar family"><button data-family="human" aria-pressed="true">Human</button><button data-family="robot" aria-pressed="false">Robot</button></div>
-      <label class="mobile-category" for="mobile-category">Customize<select id="mobile-category" data-focus-key="mobile-category" disabled aria-label="Avatar category"><option>Loading categories…</option></select></label>
-      <nav id="builder-groups" class="group-tabs" aria-label="Avatar categories"></nav>
-      <p id="creator-status" class="creator-status" role="status">All imported art is available.</p>
-      <details class="review-tools"><summary>Review tools</summary><label class="authoring-mode"><input id="authoring" type="checkbox"> Show held-back authoring controls</label><div class="config-actions"><button id="reset-config">Default look</button><button id="import-config">Import JSON</button><button id="export-config" class="primary">Export JSON</button></div><p id="storage-status">Changes stay in this browser.</p><p class="hint">Compact textures: 512px; clipped hair: 1024px. Native meshes, shapes and coverage are retained.</p></details>
-    </aside>
-    <section class="stage" aria-label="Interactive avatar preview">
-      <div class="card-heading"><h2>Your avatar</h2><p>A preview of how you look</p></div>
-      <div class="avatar-frame"><div id="viewport" tabindex="0" aria-label="3D avatar. Drag or Shift+arrow keys to orbit, scroll or pinch to zoom. Home fits the full body."></div><div id="loading" class="loading"><span class="loader"></span><p>Preparing imported meshes…</p></div><p id="scene-status" class="scene-status" role="status" aria-live="polite">Loading avatar…</p></div>
-      <div class="preview-tools"><button id="random-avatar" class="primary" title="Randomize the current family and body type using available choices" disabled>Random avatar</button><button id="a-pose" aria-pressed="false" disabled>Freeze A-pose</button><label><input id="idle" type="checkbox" disabled> Idle animation</label><label><input id="wire" type="checkbox"> Wireframe</label><label><input id="cuts" type="checkbox"> Coverage overlay</label><button id="snapshot">Save image</button><button id="ar" class="primary" hidden disabled>Open WebXR</button></div>
-      <p id="ar-status" class="hint" role="status" hidden></p><p class="hint xr-entry-hint">On a headset, Open WebXR brings your avatar and a movable configurator into your room. Point a controller at the panel to customize; hold the trigger on its bottom handle to place it in your room.</p>
-      <p id="animation-status" class="hint" hidden></p><div class="stage-foot"><p id="mesh-stats">Geometry counts will appear here.</p><button id="diagnostics-toggle" aria-expanded="false" aria-controls="diagnostics">Diagnostics ↓</button></div>
-      <section id="diagnostics" class="diagnostics" hidden><h2>Preview diagnostics</h2><div id="diagnostic-content"></div><p class="notice">Browser lighting, standing IK and the retargeted idle differ from Unity's PC/Quest rendering, Animator and live tracking.</p></section>
+<div class="xr-launch"><button id="ar" class="xr-button" hidden disabled>Open WebXR</button><p id="ar-status" class="xr-status" role="status" hidden></p></div>
+<main id="veAvatarTab" class="avatar-tab" aria-label="Avatar">
+  <div id="veAvatarRow" class="avatar-row">
+    <section id="veAvatarOptions" class="avatar-card nav-card" aria-label="Create your avatar">
+      <div class="card-header"><div class="card-header-text"><h1 id="lblNavTitle" class="card-title brand">Create Your Avatar</h1><p id="lblNavSubtitle" class="card-subtitle">Express yourself</p></div></div>
+      <div id="veAvatarFamily" class="family-bar family-switch" role="group" aria-label="Avatar family"></div>
+      <nav id="builder-groups" class="group-list" aria-label="Avatar categories"></nav>
+      <div class="status-row"><p id="creator-status" class="status-text" role="status"></p></div>
     </section>
-    <aside class="workbench" aria-label="Selected category controls">
-      <section id="tiles-card" class="tiles-card"><button id="tiles-heading" class="accordion-heading" aria-expanded="true" aria-controls="builder-controls"><span><span id="detail-title" class="heading-title">Outfits</span><small id="detail-caption"></small></span><span id="detail-count" class="detail-count"></span><span class="chevron">▾</span></button><div id="builder-controls" class="controls"></div></section>
-      <section id="colour-card" class="colour-card" hidden><button id="colour-heading" class="accordion-heading" aria-expanded="false" aria-controls="colour-body"><span><span id="colour-title" class="heading-title">Colour</span><small id="colour-caption"></small></span><span class="chevron">▸</span></button><div id="colour-body" hidden><div id="colour-tabs" class="colour-tabs" role="group" aria-label="Colour slots"></div><div id="colour-picker"></div><div id="colour-extra"></div><p class="hint">Global reward palettes from the saved catalog. Player ownership and live account updates are not connected.</p></div></section>
-    </aside>
+    <section id="veAvatarMirror" class="avatar-card mirror-card" aria-label="Your avatar">
+      <div class="card-header"><div class="card-header-text"><h2 id="lblAvatarMirrorTitle" class="card-title">Your Avatar</h2><p id="lblMirrorSubtitle" class="card-subtitle">A preview of how you look</p></div></div>
+      <div id="veAvatarMirrorImage" class="mirror-image">
+        <div id="viewport" tabindex="0" aria-label="3D avatar. Drag or Shift+arrow keys to orbit, scroll or pinch to zoom. Home fits the full body."></div>
+        <p id="lblAvatarMirrorOverlay" class="mirror-overlay" role="status"></p>
+        <div id="loading" class="loading" hidden><span class="loader"></span></div>
+        <div class="mirror-views"><button id="btnMirrorViewFront" class="segment chip-size" type="button" aria-pressed="false">Front</button><button id="btnMirrorViewSide" class="segment chip-size" type="button" aria-pressed="false">Side</button></div>
+      </div>
+    </section>
+    <div id="veAvatarDetail" class="detail-column">
+      <section id="tiles-card" class="avatar-card detail-card" aria-label="Selected category">
+        <div class="card-header"><div class="card-header-text"><h2 id="detail-title" class="card-title"></h2><p id="detail-subtitle" class="card-subtitle" hidden></p></div><span id="detail-count" class="card-count" hidden></span><button id="btnAvatarColour" class="colour-button" type="button" aria-label="Colours" hidden></button><button id="tiles-heading" type="button" hidden aria-hidden="true" tabindex="-1"></button></div>
+        <div id="builder-controls" class="detail-scroll"></div>
+      </section>
+      <section id="colour-card" class="avatar-card colour-card" aria-label="Colour" hidden>
+        <div id="veAvatarColour" class="colour-column">
+          <div class="colour-header"><h2 id="colour-title" class="card-title"></h2><span id="veColourSwatch" class="colour-swatch"></span><span class="spacer"></span><button id="btnColourClose" class="close-button" type="button" aria-label="Close colours"><span></span><span></span></button><button id="colour-heading" type="button" hidden aria-hidden="true" tabindex="-1"></button></div>
+          <div id="veColourBody" class="colour-body">
+            <div id="colour-tabs" class="colour-tabs" role="group" aria-label="Colour slots" hidden></div>
+            <div id="scrAvatarColour" class="colour-scroll">
+              <button id="btnColourDefault" class="segment chip-size" type="button" hidden>Default</button>
+              <div id="colour-picker"></div>
+              <p id="lblColourMore" class="muted-line" hidden></p>
+              <div id="veAvatarGlowStrength" class="glow-row" hidden><label for="sldAvatarGlowStrength">Glow strength</label><input id="sldAvatarGlowStrength" type="range" min="0.5" max="2.5" step="0.01" aria-label="Glow strength"><output id="lblGlowStrengthValue"></output></div>
+              <p id="lblGlowCaption" class="muted-line small" hidden></p>
+              <div id="colour-extra" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
-  <footer class="tier-footer"><label for="preview-level">Preview level</label><input id="preview-level" type="range" min="0" max="0" value="0" disabled><output id="preview-level-label" for="preview-level">All art</output><p id="tier-hint">Account rewards are not connected in this preview.</p></footer>
 </main>
-<dialog id="config-dialog" aria-labelledby="config-title"><div class="dialog-head"><h2 id="config-title">Import AvatarConfig</h2><button id="close-config">Close ✕</button></div><p>Paste Unity's version 2 AvatarConfig JSON. Your current look changes only after the document validates.</p><textarea id="config-text" spellcheck="false" aria-label="AvatarConfig JSON" rows="14"></textarea><p id="config-error" role="alert"></p><div class="dialog-actions"><label class="file-pick">Choose JSON file<input id="config-file" type="file" accept=".json,application/json"></label><button id="apply-config" class="primary">Apply configuration</button></div></dialog>
-<div id="fatal" class="fatal" hidden role="alert"><h2>Preview could not start</h2><p id="fatal-message"></p><button onclick="location.reload()">Try again</button><a href="builder.html">Return to avatar creator</a></div>
+<!-- Review utilities stay behind the existing review unlock; they are not part of the Unity tab. -->
+<aside id="review-drawer" class="review-drawer" data-review-link hidden aria-label="Review tools">
+  <details><summary>Review tools</summary>
+    <div class="review-grid">
+      <button id="random-avatar" type="button" disabled>Random avatar</button>
+      <button id="a-pose" type="button" aria-pressed="false" disabled>Freeze A-pose</button>
+      <label><input id="idle" type="checkbox" disabled> Idle animation</label>
+      <label><input id="wire" type="checkbox"> Wireframe</label>
+      <label><input id="cuts" type="checkbox"> Coverage overlay</label>
+      <button id="snapshot" type="button">Save image</button>
+      <button id="reset-config" type="button">Default look</button>
+      <button id="import-config" type="button">Import JSON</button>
+      <button id="export-config" type="button">Export JSON</button>
+      <button id="diagnostics-toggle" type="button" aria-expanded="false" aria-controls="diagnostics">Diagnostics</button>
+      <a href="index.html">Asset review</a>
+      <label hidden><input id="authoring" type="checkbox"> Authoring</label>
+      <input id="preview-level" type="range" min="0" max="0" value="0" disabled hidden><output id="preview-level-label" hidden></output>
+    </div>
+    <p id="storage-status" class="muted-line small"></p><p id="scene-status" class="muted-line small"></p><p id="mesh-stats" class="muted-line small"></p><p id="animation-status" class="muted-line small" hidden></p>
+    <section id="diagnostics" hidden><div id="diagnostic-content"></div></section>
+  </details>
+</aside>
+<dialog id="config-dialog" aria-labelledby="config-title"><div class="dialog-head"><h2 id="config-title">Import AvatarConfig</h2><button id="close-config">Close</button></div><p>Paste Unity's AvatarConfig JSON. It is worn exactly as Unity would wear it.</p><textarea id="config-text" spellcheck="false" aria-label="AvatarConfig JSON" rows="14"></textarea><p id="config-error" role="alert"></p><div class="dialog-actions"><label class="file-pick">Choose JSON file<input id="config-file" type="file" accept=".json,application/json"></label><button id="apply-config">Apply configuration</button></div></dialog>
+<div id="fatal" class="fatal" hidden role="alert"><h2>Preview could not start</h2><p id="fatal-message"></p><button onclick="location.reload()">Try again</button></div>
 <section id="ar-overlay" aria-label="Augmented reality" hidden><div id="ar-controls" class="ar-controls"><div id="xr-scene-settings" hidden><label for="ar-behavior">Avatar mode</label><select id="ar-behavior" aria-label="Avatar mode"><option value="manual">Manual</option><option value="puppet">Puppet</option><option value="follow">Follow</option></select><label><input id="ar-mirror" type="checkbox" checked> Mirror puppet</label><button id="ar-calibrate">Calibrate T-pose</button><label for="ar-collision">Collision</label><select id="ar-collision" aria-label="Collision"><option value="room">Room</option><option value="floor">Floor only</option></select><label for="ar-run-mode">Run control</label><select id="ar-run-mode" aria-label="Run control"><option value="toggle">Click to toggle</option><option value="hold">Hold to run</option></select><label for="ar-quality">Render quality</label><select id="ar-quality" aria-label="Render quality"><option value="sharp">Sharp</option><option value="balanced" selected>Balanced</option><option value="fast">Fast</option></select><label for="ar-animation-rate">Animation rate</label><select id="ar-animation-rate" aria-label="Animation rate"><option value="1">Every frame</option><option value="2">Every 2nd frame</option></select><label for="ar-occlusion">Occlusion</label><select id="ar-occlusion" aria-label="Occlusion"><option value="off">Off</option><option value="planes">Room setup</option><option value="mesh">Scanned mesh</option><option value="both" selected>Setup + scan</option><option value="depth">Live depth</option></select><label><input id="ar-shadows" type="checkbox" checked> Avatar shadow</label></div><p id="ar-hint" role="status">Point at the floor to place your avatar.</p><p id="ar-room-status" class="hint" role="status">Room geometry is checked when WebXR starts.</p><label class="ar-size" for="ar-size">Avatar size <input id="ar-size" type="range" min="25" max="125" step="5" value="75"><output id="ar-size-label" for="ar-size">75%</output></label><label id="ar-seat-height-control" class="ar-size ar-seat-height" for="ar-seat-height" hidden>Fallback seat height <input id="ar-seat-height" type="range" min="20" max="90" step="5" value="45"><output id="ar-seat-height-label" for="ar-seat-height">45 cm</output></label><div><button id="ar-walk" aria-pressed="false" disabled>Stop walking</button><button id="ar-crawl" aria-pressed="false" disabled>Crawl</button><button id="ar-fly" aria-pressed="false" disabled>Fly</button><button id="ar-sit" aria-pressed="false">Sit</button><button id="ar-turn" disabled>Turn 45&deg;</button><button id="ar-reposition">Reposition</button><button id="ar-freeze" disabled>Freeze A-pose</button><button id="ar-exit">Exit AR</button></div></div></section>
-</body></html>
-
-
+</body>
+</html>

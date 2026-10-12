@@ -17,6 +17,9 @@ def version(path):
     done[path]=hashlib.sha256(path.read_bytes()).hexdigest()[:12]
     return done[path]
 for path in sorted(web.glob('builder-*.mjs')):version(path)
+contract=hashlib.sha256((web/'browser_data'/'creator_contract.json').read_bytes()).hexdigest()[:12]
+builder=(web/'builder.js').read_text(encoding='utf-8')
+(web/'builder.js').write_text(re.sub(r'browser_data/creator_contract\.json(?:\?v=[\w-]+)?','browser_data/creator_contract.json?v='+contract,builder),encoding='utf-8')
 version(web/'builder.js')
 css=hashlib.sha256((web/'builder.css').read_bytes()).hexdigest()[:12]
 review=hashlib.sha256((web/'review-access.js').read_bytes()).hexdigest()[:12]

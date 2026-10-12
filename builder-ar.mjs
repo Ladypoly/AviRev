@@ -271,7 +271,17 @@ export class AvatarAR {
     }catch(error){if(session===this.session&&generation===this.motionGeneration){(this.motionFailures||=new Set()).add(key);this.message(error.message);}}
     finally{if(generation===this.motionGeneration)this.directRequest=this.directionRequest=null;}
   }
+  /** Double jump: a second jump press while airborne takes off into flight from where the avatar is. */
+  async flyFromJump() {
+    if (!this.canMove() || this.modeBusy || this.flightMode || !this.jumpState || this.motor.grounded) return;
+    const session=this.session,generation=++this.motionGeneration;this.modeBusy=true;
+    try{const ready=await this.owner.prepareAction('fly');
+      if(ready!==false&&session===this.session&&generation===this.motionGeneration&&this.canMove()&&!this.motor.grounded&&!this.trackingPaused&&this.modeClear('fly')){this.jumpState=null;this.jumpHeight=0;this.flightMode=this.flying=true;this.flightLandTime=0;this.landingBlocked=false;this.crawlMode=false;this.direct='fly';this.directDirection='forward';this.owner.setGaitDirection?.('forward');this.owner.setAction('fly');this.motor.velocity.y=Math.max(0,this.motor.velocity.y);this.motor.grounded=false;this.runtimeError=null;}}
+    catch(error){if(session===this.session&&generation===this.motionGeneration)this.message(error.message);}
+    finally{if(session===this.session&&generation===this.motionGeneration){this.modeBusy=false;this.walkButton();}}
+  }
   async jump() {
+    if (this.jumpState && !this.jumpBusy) return this.flyFromJump();
     if (!this.canMove() || this.jumpBusy || this.jumpState || this.flightMode || !this.motor.grounded) return;
     const scale=this.owner.group.scale.x;if(this.world&&!this.collisionWorld().canOccupy(this.anchor,this.height*scale,.18*scale)){this.message('There is not enough room to jump here.');return;}
     this.manualOverride(true);

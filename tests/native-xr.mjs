@@ -99,7 +99,14 @@ for (const [familyName, collision] of [['human', 'floor'], ['robot', 'floor'], [
   right.gamepad.axes[2] = 0; await step(.6); const high = ar.anchor.y; check(high > (ar.groundY ?? 0) + .3, label + ' flight climbs');
   right.gamepad.axes[3] = 1; for (let i = 0; i < 120 && ar.flightMode; i++) await step(.1);
   check(!ar.flightMode && ar.motor.grounded && Math.abs(ar.anchor.y - ar.groundY) < .05, label + ' pulling back descends and lands on the floor' + (ar.runtimeError ? ': ' + ar.runtimeError : ''));
-  right.gamepad.axes[3] = 0;
+  right.gamepad.axes[3] = 0; await step(.5);
+  // Double jump: A, then A again while airborne, takes off into flight from mid-air.
+  const press = async seconds => { right.gamepad.buttons[4].pressed = true; await step(1 / 72); right.gamepad.buttons[4].pressed = false; await step(seconds); };
+  await press(.15); check(!!ar.jumpState && !ar.motor.grounded, label + ' A jumps'); await press(0); for (let i = 0; i < 30 && !ar.flightMode; i++) await step(.05);
+  check(ar.flightMode && ar.flying && !ar.jumpState, label + ' second A while airborne enters flight' + (ar.runtimeError ? ': ' + ar.runtimeError : ''));
+  right.gamepad.axes[3] = 1; for (let i = 0; i < 120 && ar.flightMode; i++) await step(.1); right.gamepad.axes[3] = 0;
+  check(!ar.flightMode && ar.motor.grounded, label + ' double-jump flight lands again');
+  await press(1.5); check(!ar.flightMode && ar.motor.grounded && !ar.jumpState, label + ' single jump still lands normally');
   await session.end();
   if (collision === 'room') continue;
 

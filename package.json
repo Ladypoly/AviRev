@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/xr-controls.mjs && node tests/native-xr.mjs"
+    "test": "node tests/xr-controls.mjs && node tests/native-xr.mjs && node tests/unity-parity.mjs"
   }
 }

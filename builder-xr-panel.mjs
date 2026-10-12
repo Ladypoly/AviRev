@@ -1,5 +1,5 @@
 import * as THREE from './libs/three/package/build/three.module.js';
-import { hexRgb, rgbHex, rgbHsv, hsvRgb } from './builder-colour.mjs?v=a63afa0cf0f1';
+import { hexRgb, rgbHex, rgbHsv, hsvRgb } from './builder-colour.mjs?v=242184bdff1b';
 
 const label = node => node.getAttribute('aria-label') || node.title || node.textContent.trim();
 const shown = node => !node.closest('[hidden]');
@@ -14,7 +14,7 @@ const HELP = {
   'ar-occlusion':'What hides the avatar behind real things. Room setup uses the walls and furniture boxes from Quest Space Setup; Scanned mesh uses the detailed room scan; Live depth uses the headset depth sensor every frame, so hands and moving objects occlude too (starts the next time you enter WebXR, costs GPU). Off saves GPU time.',
   'ar-shadows':'The soft floor shadow under the avatar. Turning it off saves a shadow render every frame.',
   'ar-crawl':'Enter or leave crawling. Move with the left stick; right stick turns. Standing again needs clear space above the avatar.',
-  'ar-fly':'Hold right-stick forward in the stretch pose for 1 second to fly; a ring at the avatar feet fills while you hold. Keep it forward to rise; pull back to descend. Near the floor, hold back for 1 second to land. Left stick moves and strafes; right stick left/right turns.',
+  'ar-fly':'Double jump (A, then A again in the air) or hold right-stick forward in the stretch pose for 1 second to fly; a ring at the avatar feet fills while you hold. Keep it forward to rise; pull back to descend. Near the floor, hold back for 1 second to land. Left stick moves and strafes; right stick left/right turns.',
   'ar-sit':'Sit on a scanned seat, or the floor. Hold crouch still for 1 second to sit on the floor. Right stick forward stands up.',
   'ar-size':'Change the avatar size while keeping its feet on the floor. Bigger avatars need more room around and above them.',
   'ar-seat-height':'Set the chair height when no scanned seat is available.',
@@ -39,11 +39,12 @@ const describe = node => ({ key: node.dataset.focusKey || node.id || label(node)
 export function creatorPanelBridge(document, bodyType, look = {}) {
   const id = name => document.getElementById(name);
   return {
-    observe(changed) { const text=new Map(['ar-hint','ar-room-status'].map(key=>[key,id(key)?.textContent]));const observer=new MutationObserver(records=>{if(records.some(record=>{if(record.type==='attributes'&&record.oldValue===record.target.getAttribute(record.attributeName))return false;const node=record.target.nodeType===3?record.target.parentElement:record.target;const status=node.closest?.('#ar-hint,#ar-room-status');if(status){const previous=text.get(status.id);text.set(status.id,status.textContent);return previous!==status.textContent;}return true;}))changed();});for(const node of document.querySelectorAll('#builder-groups,#builder-controls,#colour-tabs,#colour-picker,#colour-extra,#creator-status,#preview-level-label,.family-switch,.preview-tools,#ar-controls'))observer.observe(node,{childList:true,subtree:true,attributes:true,attributeOldValue:true,characterData:true});return()=>observer.disconnect(); },
+    observe(changed) { const text=new Map(['ar-hint','ar-room-status'].map(key=>[key,id(key)?.textContent]));const observer=new MutationObserver(records=>{if(records.some(record=>{if(record.type==='attributes'&&record.oldValue===record.target.getAttribute(record.attributeName))return false;const node=record.target.nodeType===3?record.target.parentElement:record.target;const status=node.closest?.('#ar-hint,#ar-room-status');if(status){const previous=text.get(status.id);text.set(status.id,status.textContent);return previous!==status.textContent;}return true;}))changed();});for(const node of document.querySelectorAll('#builder-groups,#builder-controls,#colour-tabs,#colour-picker,#colour-extra,#scrAvatarColour,#creator-status,#preview-level-label,.family-switch,.preview-tools,#ar-controls'))observer.observe(node,{childList:true,subtree:true,attributes:true,attributeOldValue:true,characterData:true});return()=>observer.disconnect(); },
     tab(view) { const node = id(view === 'colours' ? 'colour-heading' : 'tiles-heading'); if (node && !node.disabled && (view !== 'colours' || node.getAttribute('aria-expanded') !== 'true')) node.click(); },
     snapshot(view) {
-      const roots = view === 'colours' ? ['colour-tabs','colour-extra'] : view === 'scene' ? [] : ['builder-controls'];
-      const controls = roots.flatMap(name => [...(id(name)?.querySelectorAll('button,input[type="range"]') || [])].filter(shown).map(describe));
+      const roots = view === 'colours' ? ['colour-tabs','scrAvatarColour'] : view === 'scene' ? [] : ['builder-controls'];
+      // The picker's own brightness bar is drawn by the panel's ring and square; only its swatches and the Default/glow controls are mirrored.
+      const controls = roots.flatMap(name => [...(id(name)?.querySelectorAll('button,input[type="range"]') || [])].filter(node => shown(node) && !(node.type === 'range' && node.closest('.colour-picker'))).map(describe));
       if (view === 'customize') for (const search of id('builder-controls')?.querySelectorAll('input[type="search"]') || []) if (shown(search) && search.value) controls.unshift({ key:'clear:'+search.getAttribute('aria-label'), label:'Clear search: '+search.value, type:'clear', node:search });
       let colour = null;
       if (view === 'colours') {
@@ -52,7 +53,7 @@ export function creatorPanelBridge(document, bodyType, look = {}) {
       }
       if (view === 'scene') controls.push(...SCENE_IDS.map(id).filter(node => node && (node.id.startsWith('ar-') || shown(node))).map(node => ({...describe(node), disabled:node.disabled || node.id==='ar-seat-height'&&!!id('ar-seat-height-control')?.hidden, label:node.id==='preview-level'?'Preview level · '+id('preview-level-label').textContent:SCENE_LABELS[node.id]||label(node)})));
       const type=bodyType(), random=id('random-avatar');
-      return { title:id('detail-title')?.textContent || 'Avatar', colourOnly:!!id('tiles-card')?.hidden&&!id('colour-card')?.hidden, slot:(id('colour-title')?.textContent||'').replace(/^Colour · /,''), status:id('creator-status')?.textContent || '', roomStatus:id('ar-room-status')?.textContent || '', hint:id('ar-hint')?.textContent || '', colour,
+      return { title:id('detail-title')?.textContent || 'Avatar', colourOnly:!!id('tiles-card')?.hidden&&!id('colour-card')?.hidden, slot:(id('colour-title')?.textContent||'').replace(/^Colour [·–] /,''), status:id('creator-status')?.textContent || '', roomStatus:id('ar-room-status')?.textContent || '', hint:id('ar-hint')?.textContent || '', colour,
         global:[...document.querySelectorAll('[data-family]')].map(describe).concat(['male','female'].map(value=>({key:'body:'+value,label:value==='male'?'Male':'Female',type:'body',value,selected:type.value===value,disabled:!type.allowed}))),
         groups:[...(id('builder-groups')?.querySelectorAll('button') || [])].map(node=>({...describe(node),label:node.querySelector('.nav-title')?.textContent || label(node)})), controls,
         look:{wearing:look.wearing?.()||[],canUndo:!!look.canUndo?.(),canRedo:!!look.canRedo?.()}, random:random?{...describe(random),label:'Surprise me',disabled:random.disabled}:null };
@@ -263,9 +264,9 @@ export class XRConfiguratorPanel {
       segmented(rows.get('ar-collision'),{room:'Room',floor:'Floor only'});segmented(rows.get('ar-run-mode'),{toggle:'Click to toggle',hold:'Hold to run'});
     }else if(this.sceneSection==='move'){
       heading('Movement & poses');const w=(width-12)/2;
-      for(const pair of [[['ar-crawl','Left stick moves while crawling.'],['ar-fly','Or hold right stick forward for 1 s.']],[['ar-sit','Or hold crouch still for 1 s.'],['ar-walk','Cancels a pointed destination.']]]){pair.forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));y+=130;}
+      for(const pair of [[['ar-crawl','Left stick moves while crawling.'],['ar-fly','Or double jump, or hold right stick forward 1 s.']],[['ar-sit','Or hold crouch still for 1 s.'],['ar-walk','Cancels a pointed destination.']]]){pair.forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));y+=130;}
       this.shape(ctx,x0,y,width,176,20,C.surface);
-      [['LEFT STICK','Walk and strafe · click to run'],['RIGHT STICK','Turn · forward 1 s fly or stand · back 1 s sit'],['A BUTTON','Jump'],['BOTH STICKS','In a T-pose: calibrate Puppet']].forEach(([key,value],index)=>{this.text(ctx,key,x0+24,y+40+index*38,190,20,C.accent,{weight:700});this.text(ctx,value,x0+214,y+40+index*38,width-238,20,C.text);});
+      [['LEFT STICK','Walk and strafe · click to run'],['RIGHT STICK','Turn · forward 1 s fly or stand · back 1 s sit'],['A BUTTON','Jump · press again in the air to fly'],['BOTH STICKS','In a T-pose: calibrate Puppet']].forEach(([key,value],index)=>{this.text(ctx,key,x0+24,y+40+index*38,190,20,C.accent,{weight:700});this.text(ctx,value,x0+214,y+40+index*38,width-238,20,C.text);});
     }else if(this.sceneSection==='place'){
       heading('Placement & size');for(const id of ['ar-size','ar-seat-height']){const row=rows.get(id);if(row&&!row.disabled){this.rangeRow(ctx,row,x0,y,width,88);y+=100;}}
       const w=(width-24)/3;[['ar-turn','For chairs: face the front.'],['ar-reposition','Pick a new floor spot.'],['ar-exit','Back to the browser.']].forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));

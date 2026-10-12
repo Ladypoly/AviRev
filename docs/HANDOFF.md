@@ -4,7 +4,19 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `16b15af95ec5` (12 October 2026, third release of the day): [Release 16b15af95ec5](#release-16b15af95ec5) on top of `6c23a0d23dcf`. Its 5 changed runtime files were uploaded dependencies-first, all 20 builder runtime files matched local SHA-256 with zero redirects, and the live page loaded in headless Edge without console errors (favicon 404 only).
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `6bd9b9bb07e3` (12 October 2026, fourth release of the day): [Release 6bd9b9bb07e3](#release-6bd9b9bb07e3) on top of `16b15af95ec5`. Its 10 changed runtime files were uploaded dependencies-first with `builder.html` last; all 22 builder runtime files (including `browser_data/creator_contract.json`) byte-matched local with HTTP 200, correct MIME and zero redirects, and the live page ran 8 creator states in headless Edge without console errors.
+
+## Release 6bd9b9bb07e3
+
+- **Unity-identical browser creator.** `builder.html`/`builder.css`/`builder.js` were rewritten after `AvatarPanelPresenter`, `AvatarUiStyles`, `OptionTile` and `ColourColumn`: nav card (family switch, groups with "n of m" captions), mirror card (Front/Side), detail card (rows, 88 px tiles with CDN pictures, sliders, segments) and the colour column (`ColorPickerElement` compact theme, presets, glow). Unity element ids (`veAvatarTab`, `btnAvatarColour`, `scrAvatarColour`…) are kept for cross-reference. The only extra chrome is the WebXR/AR launch button in the top-right corner; review tools sit in a drawer behind the existing review unlock.
+- **Unity rules, not web approximations.** `builder-contract.mjs` ports `OptionAvailability`, `AvatarConfigResolver.Clamp`, `WornConfig.For`, `DefaultLook`, `ClothingLayers.Pick`, `BodyShape.SetFemale`, `HeadgearRules` and `HumanColourDefaults` over `browser_data/creator_contract.json`, a one-off read-only export of Unity's catalog, strings, palettes, allowances and glow limits at the top of the reward ladder (level 50; ladder saved 2026-10-12T09:48Z). The temporary Unity exporter was deleted after use; Unity has no trace of it.
+- **Parity test.** `tests/unity-parity.mjs` (now in `npm test`) replays `tests/fixtures/unity_creator_vectors.json`: 600 Unity-computed clamps and 200 pick/body sequences, 1,802 checks. A mutation run confirmed it fails on rule drift.
+- **Colours follow `HumanColourDefaults.Fill`.** Unset skin keeps the material's own colour (the web previously forced `#e9bfae`); lips (0.5) and nails (0.75, was 0.5) only follow a chosen skin.
+- **Mirror framing.** Face/Head focus frames the posed head in world space (width and depth, so idle turns stay in frame) and keeps the head top visible in the narrow portrait mirror.
+- **Picker swatches** apply on `click` (was `pointerdown` only, which synthetic/panel clicks never fired).
+- **Headset panel bridge** reads the new DOM (`colour-tabs` + `scrAvatarColour`); tile picks, colour tab, HEX dispatch and scene controls were exercised in a browser.
+- **Double jump enters fly mode** (`flyFromJump`), in addition to the stretch hold.
+- Not done: no pixel overlay against a live Unity capture (`AvatarUiScriptedCapture` needs Unity in the foreground).
 
 ## Release 16b15af95ec5
 
