@@ -4,7 +4,16 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `1bb0d039acad` (12 October 2026, fifth release of the day): [Release 1bb0d039acad](#release-1bb0d039acad) on top of `6bd9b9bb07e3`. Its 4 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page ran at 2560×1330 without console errors.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `053d731dba5e` (12 October 2026, sixth release of the day): [Release 053d731dba5e](#release-053d731dba5e) on top of `1bb0d039acad`. Its 7 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page flew a winged Robot without console errors.
+
+## Release 053d731dba5e
+
+- **Turn speed doubled:** full-stick avatar turn is `TURN_RATE` = 3.6 rad/s (was 1.8).
+- **Robot wing beat:** `createWingFlap` (builder-animation) is an after-layer on every `fly*` player; it rotates `Wing_L`/`Wing_R` and their children about the torso's forward axis through each root (12° lift ± 32°, 2.2 Hz, mirrored). Unity has no wing animation; this is web-only and procedural.
+- **Floor-only collision is the default** (`#ar-collision`).
+- **Wrist menu** (left palm up, 17 cm card): Hide/Show panel, Reposition, Mode Manual|Puppet, Collide Room|Floor, Occlusion (tap cycles Off → Room setup → Scanned mesh → Setup + scan → Live depth). All rows dispatch the native controls.
+- **Occlusion fix (unverified on hardware):** occluders no longer require `XRWorld.complete`; one unposed or over-budget surface used to switch all occlusion off, so every source looked identical. Status now reports what is occluding (`occluding N setup + M scan`), also in Floor-only mode. Live depth still only starts on the next WebXR entry.
+- `AVIREV_BUILDER.previewAction(name)` (debug) plays a locomotion action in the desktop mirror, e.g. `'fly'`.
 
 ## Release 1bb0d039acad
 

@@ -177,6 +177,34 @@ export function createPuppetLayer(family) {
   return layer;
 }
 /** Current posed vertex positions for grounding/seating/framing; GPU-skinned items are skinned here only on request. */
+/**
+ * Procedural wing beat for the Robot's Wing_L/Wing_R roots; Unity ships the wings without animation. Each wing root and
+ * everything under it rotates about the torso's forward axis through the root, mirrored left/right, so every wing
+ * mesh (rigid child of the root) flaps.
+ */
+export function createWingFlap(family, clock = () => performance.now() / 1000) {
+  const find = name => family?.skeleton?.find(bone => bone.name === name)?.path;
+  const left = find('Wing_L'), right = find('Wing_R'), spine = find('Spine1'), hips = find('Hips');
+  if (!left || !right) return null;
+  const rotation = new THREE.Matrix4(), back = new THREE.Matrix4(), delta = new THREE.Matrix4();
+  return {
+    rate: 2.2, amplitude: THREE.MathUtils.degToRad(32), lift: THREE.MathUtils.degToRad(12),
+    apply(current) {
+      const l = current.get(left), r = current.get(right); if (!l || !r) return current;
+      const lp = new THREE.Vector3().setFromMatrixPosition(l), rp = new THREE.Vector3().setFromMatrixPosition(r), lateral = lp.clone().sub(rp);
+      const top = spine && current.get(spine), base = hips && current.get(hips);
+      const up = top && base ? new THREE.Vector3().setFromMatrixPosition(top).sub(new THREE.Vector3().setFromMatrixPosition(base)) : new THREE.Vector3(0, 1, 0);
+      const forward = lateral.normalize().clone().cross(up.normalize());
+      if (!(forward.lengthSq() > .25)) return current; forward.normalize();
+      const angle = this.lift + this.amplitude * Math.sin(clock() * this.rate * 2 * Math.PI);
+      for (const [path, sign, pivot] of [[left, 1, lp], [right, -1, rp]]) {
+        delta.makeTranslation(pivot.x, pivot.y, pivot.z).multiply(rotation.makeRotationAxis(forward, sign * angle)).multiply(back.makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+        for (const [key, matrix] of current) if (key === path || key.startsWith(path + '/')) matrix.premultiply(delta);
+      }
+      return current;
+    }
+  };
+}
 export function posedPositions(item) {
   const attribute = item.geometry.getAttribute('position'), skin = item.skin;
   if (!item.mesh?.isSkinnedMesh || !skin?.base) return attribute.array;
@@ -350,7 +378,7 @@ export function createIdlePlayer(family, config, library, initialClip) {
     }
   }
   selectClip(clipIndex);
-  let phase = 0, previous = null, playing = true, changed = true, aPose = false, transition = null, blendAge = 0, footLock = true, grounded = true, tiptoe = false, blendDuration = .6, poseLayer = null, sampling = false, lastLayerActive = false, speed = 1, nativeStanceSpeed = null, gaitSpeed = 1;
+  let phase = 0, previous = null, playing = true, changed = true, aPose = false, transition = null, blendAge = 0, footLock = true, grounded = true, tiptoe = false, blendDuration = .6, poseLayer = null, afterLayer = null, sampling = false, lastLayerActive = false, speed = 1, nativeStanceSpeed = null, gaitSpeed = 1;
   const toeTargets = new Map(); let toeRise = 0;
   for (const side of ['l', 'r']) {
     const prefix = side === 'l' ? 'Left' : 'Right', foot = nativeNames.get(family.Family === 'human' ? `foot.${side}` : `${prefix}Foot`), toe = nativeNames.get(family.Family === 'human' ? `toes_01.${side}` : `${prefix}ToeBase`);
@@ -418,6 +446,7 @@ export function createIdlePlayer(family, config, library, initialClip) {
     get aPose() { return aPose; },
     setAPose(value) { aPose = !!value; previous = null; transition = null; changed = true; },
     setPoseLayer(value) { poseLayer = value; changed = true; },
+    setAfterLayer(value) { afterLayer = value || null; changed = true; },
     setFootLock(value) { footLock = !!value; changed = true; },
     setGrounded(value) { grounded = !!value; changed = true; },
     setTiptoe(value) { tiptoe = !!value; changed = true; },
@@ -517,7 +546,8 @@ export function createIdlePlayer(family, config, library, initialClip) {
         }
         if (Number.isFinite(lowest)) for (const matrix of current.values()) matrix.elements[13] += baseline - lowest;
       }
-      return !sampling && poseLayer?.active ? poseLayer.apply(current) : current;
+      const layered = !sampling && poseLayer?.active ? poseLayer.apply(current) : current;
+      return !sampling && afterLayer ? afterLayer.apply(layered) : layered;
     },
     sampleGeometry(time, items) {
       const state={phase,previous,playing,changed,aPose,transition,blendAge,blendDuration,contacts,sampling,lastLayerActive};

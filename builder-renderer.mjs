@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, posedPositions } from './builder-animation.mjs?v=686a11c7f747';
+import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, createWingFlap, posedPositions } from './builder-animation.mjs?v=1101e0a43ead';
 import { OrbitControls } from './libs/three/package/examples/jsm/controls/OrbitControls.js';
 import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
 import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=7c5c6c7160c1';
@@ -147,7 +147,7 @@ export class AvatarRenderer {
     this.actionPlayers ||= {}; this.actionClips = {...this.actionClips, ...library};
     if (!this.actionPlayers[name]) {
       const player = this.actionPlayers[name] = this.idleFactory(family, config, library[name]);
-      player.setPoseLayer(this.puppetLayer); player.setFootLock(name === 'stretch'); player.setTiptoe(name === 'stretch'); player.setGrounded(!/^(crawl|fly)/.test(name)); player.setPlaying(false);
+      player.setPoseLayer(this.puppetLayer); if (/^fly/.test(name)) { if (this.wingFamily !== family) { this.wingFamily = family; this.wingFlap = createWingFlap(family); } player.setAfterLayer(this.wingFlap); } player.setFootLock(name === 'stretch'); player.setTiptoe(name === 'stretch'); player.setGrounded(!/^(crawl|fly)/.test(name)); player.setPlaying(false);
       if (/^(walk|run|crouch)(Backward|Left|Right)?$/.test(name) || name === 'crawl') player.calibrateGaitSpeed(library[name][config.BodyType]?.[0]?.nativeWalkSpeed || (name.startsWith('run') ? 1.5 : name.startsWith('crouch') ? .28 : name === 'crawl' ? .45 : .6));
       for (const item of this.active) { this.applyMorphs(item, this.currentWeights); player.capture(item); }
       const current = this.animationPlayer(); if (current) { current.phase = current.phase; current.update(performance.now() / 1000, this.active); }

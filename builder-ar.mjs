@@ -1,6 +1,6 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { AvatarMovementMotor } from './builder-movement.mjs?v=e772e5919b76';
-import { XRWorld } from './builder-xr-world.mjs?v=6f053e49e2b5';
+import { XRWorld } from './builder-xr-world.mjs?v=0dc639784027';
 import { AvatarFollower } from './builder-follow.mjs?v=9cb113ed3702';
 
 export function floorCandidate(matrix, viewer, floorY = null) {
@@ -17,6 +17,8 @@ const PERFORMANCE_KEY='avirev.xr-performance.v1';
 // Seconds a stick gesture must be held to take off, sit on the floor or land.
 const HOLD=1;
 // Occlusion sources: Quest room setup planes, the scanned room mesh, both, or live per-frame depth (needs a new session).
+// Full-stick avatar turn speed in rad/s (doubled from 1.8 on 2026-10-12: turning felt slow).
+const TURN_RATE=3.6;
 const OCCLUSION={off:[],planes:['plane'],mesh:['mesh'],both:['mesh','plane'],depth:[]};
 // Resolution is fixed per WebXR session; foveation, shadows, occlusion and animation rate change live.
 const QUALITY={sharp:{scale:1,foveation:.3,shadowMap:1024},balanced:{scale:.85,foveation:.7,shadowMap:1024},fast:{scale:.7,foveation:1,shadowMap:512}};
@@ -376,7 +378,7 @@ export class AvatarAR {
     // Frame rate is reported once per second so the status text does not force panel redraws every frame.
     if(elapsed>0){this.frameTimes=(this.frameTimes||0)+elapsed;this.frameCount=(this.frameCount||0)+1;if(this.frameTimes>=1){this.fps=Math.round(this.frameCount/this.frameTimes);this.frameTimes=this.frameCount=0;}}
     this.world?.update(frame,space);const occlusion=this.performance().occlusion,depthMesh=this.owner.renderer.xr.getDepthSensingMesh?.();if(depthMesh)depthMesh.visible=occlusion==='depth';
-    const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored.':this.world?.statusText||'')+(occlusion==='depth'?this.depthActive?' · live depth occlusion':' · live depth after re-entry':'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
+    const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored'+(occlusion!=='depth'&&this.world?.occlusionText?' · '+this.world.occlusionText:''):this.world?.statusText||'')+(occlusion==='depth'?this.depthActive?' · live depth occlusion':' · live depth after re-entry':'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
     const inputs = [...(this.session.inputSources || [])], tracked = inputs.filter(input => input.targetRayMode === 'tracked-pointer');
     if (inputs.some(input => input.targetRayMode !== 'screen')) this.headset = true;
     if (this.headset && this.ui.panel && !this.panelStarted) { this.ui.panel.start({session:this.session,scene:this.owner.scene,renderer:this.owner.renderer,avatar:this.owner}); this.panelStarted=true; }
@@ -407,7 +409,7 @@ export class AvatarAR {
         const x=Number(axes[2]),z=Number(axes[3]);if(this.flightMode&&Math.abs(z)>.18)entry.flightAxisUsed=true;else if(Math.abs(z)<=.18)entry.flightAxisUsed=false;
         // A mostly vertical right stick is a stretch/crouch/altitude gesture; sideways drift must not turn or reset its hold timer.
         const vertical=Number.isFinite(z)&&Math.abs(z)>.35&&Math.abs(x)<Math.abs(z)*.75;
-        if(Number.isFinite(x)&&Math.abs(x)>.18&&!vertical){this.manualOverride();this.turnInput=-Math.sign(x)*Math.min(1,(Math.abs(x)-.18)/.82)*1.8;}
+        if(Number.isFinite(x)&&Math.abs(x)>.18&&!vertical){this.manualOverride();this.turnInput=-Math.sign(x)*Math.min(1,(Math.abs(x)-.18)/.82)*TURN_RATE;}
         const forward=Number.isFinite(z)&&z<-.35;
         if(this.behavior!=='puppet'&&this.seatPoint&&forward&&!entry.standPressed){this.stand();entry.standPressed=true;}else if(!forward)entry.standPressed=false;
         if(this.flightMode&&this.flying){this.flightAxis=Number.isFinite(z)&&Math.abs(z)>.18?-Math.sign(z)*Math.min(1,(Math.abs(z)-.18)/.82):0;this.flightCrouchHeld=Number.isFinite(z)&&z>.35;}

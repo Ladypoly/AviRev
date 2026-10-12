@@ -106,7 +106,7 @@ export class XRConfiguratorPanel {
     this.mesh.visible=false;this.mesh.name='AviRev configurator';this.scene.add(this.mesh);
     this.wristCanvas=document.createElement('canvas');this.wristCanvas.width=this.wristCanvas.height=512;
     const wristTexture=new THREE.CanvasTexture(this.wristCanvas);wristTexture.colorSpace=THREE.SRGBColorSpace;
-    this.wrist=new THREE.Mesh(new THREE.CircleGeometry(.09,64),new THREE.MeshBasicMaterial({map:wristTexture,transparent:true,depthTest:false,depthWrite:false,toneMapped:false}));this.wrist.renderOrder=10002;this.wrist.visible=false;this.wrist.name='AviRev wrist menu';
+    this.wrist=new THREE.Mesh(new THREE.PlaneGeometry(.17,.17),new THREE.MeshBasicMaterial({map:wristTexture,transparent:true,depthTest:false,depthWrite:false,toneMapped:false}));this.wrist.renderOrder=10002;this.wrist.visible=false;this.wrist.name='AviRev wrist menu';
     this.wristCursor=new THREE.Mesh(new THREE.RingGeometry(.003,.0045,16),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,depthTest:false,depthWrite:false,toneMapped:false}));this.wristCursor.renderOrder=10003;this.wristCursor.visible=false;this.wrist.add(this.wristCursor);this.scene.add(this.wrist);
     this.unobserve=this.bridge.observe?.(()=>{this.dirty=true;});this.draw();
   }
@@ -305,15 +305,23 @@ export class XRConfiguratorPanel {
   }
   drawWrist() {
     if(!this.wristCanvas)return;
-    // The wrist menu has two jobs: show or hide the creator panel, and reposition the avatar.
-    const reposition=(this.bridge.snapshot('scene').controls||[]).find(row=>row.key==='ar-reposition');
-    const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled]);if(signature===this.wristSignature)return;this.wristSignature=signature;
+    // The wrist menu: show/hide the creator panel, reposition, and the three scene switches people change most.
+    const rows=new Map((this.bridge.snapshot('scene').controls||[]).map(row=>[row.key,row])),reposition=rows.get('ar-reposition'),behavior=rows.get('ar-behavior'),collision=rows.get('ar-collision'),occlusion=rows.get('ar-occlusion');
+    const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled,behavior?.value,collision?.value,occlusion?.value]);if(signature===this.wristSignature)return;this.wristSignature=signature;
     const ctx=this.wristCanvas.getContext('2d'),scale=512/480;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,512,512);ctx.setTransform(scale,0,0,scale,0,0);
-    ctx.beginPath();ctx.arc(240,240,238,0,Math.PI*2);ctx.fillStyle=C.ground;ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=C.line;ctx.stroke();
+    this.shape(ctx,4,4,472,472,36,C.ground,C.line,3);
     this.wristRegions=[];
-    const button=(id,y,title,detail,fill,ink,action,disabled=false)=>{const hover=this.wristHover===id&&!disabled;this.shape(ctx,70,y,340,150,40,disabled?C.locked:hover?(fill===C.accent?'#B7C0FF':C.selected):fill,hover?C.warm:fill===C.accent?null:C.line,4);this.text(ctx,title,240,y+70,300,40,disabled?C.faint:ink,{align:'center',weight:700});this.text(ctx,detail,240,y+112,300,24,disabled?C.faint:ink,{align:'center'});this.wristRegions.push({id,x:70,y,w:340,h:150,disabled,action});};
-    button('panel',72,this.hidden?'Show panel':'Hide panel',this.hidden?'Opens in front of you':'Hides the creator',C.accent,C.ground,()=>{this.hidden=!this.hidden;if(!this.hidden)this.recenter();});
-    button('reposition',258,'Reposition','Pick a new floor spot',C.surface,C.text,()=>{if(reposition)this.bridge.dispatch(reposition);this.dirty=true;},!reposition||reposition.disabled);
+    const ROW=80,GAP=10,TOP=22,X=22,WIDTH=436,y=index=>TOP+index*(ROW+GAP);
+    const region=(id,x,top,w,disabled,action)=>this.wristRegions.push({id,x,y:top,w,h:ROW,disabled,action});
+    const button=(id,index,title,fill,ink,action,disabled=false)=>{const hover=this.wristHover===id&&!disabled;this.shape(ctx,X,y(index),WIDTH,ROW,22,disabled?C.locked:hover?(fill===C.accent?'#B7C0FF':C.selected):fill,hover?C.warm:fill===C.accent?null:C.line,3);this.text(ctx,title,240,y(index)+52,WIDTH-30,30,disabled?C.faint:ink,{align:'center',weight:700});region(id,X,y(index),WIDTH,disabled,action);};
+    const segments=(id,index,label,row,choices)=>{const top=y(index),labelWidth=130,width=(WIDTH-labelWidth)/choices.length;this.text(ctx,label,X+8,top+50,labelWidth-12,24,C.muted,{weight:700});
+      choices.forEach(([value,title],i)=>{const key=id+':'+value,x=X+labelWidth+i*width,selected=row?.value===value,disabled=!row||row.disabled,hover=this.wristHover===key&&!disabled;this.shape(ctx,x+3,top,width-6,ROW,20,disabled?C.locked:selected?C.accent:hover?C.selected:C.surface,hover?C.warm:selected?null:C.line,3);this.text(ctx,title,x+width/2,top+51,width-16,27,disabled?C.faint:selected?C.ground:C.text,{align:'center',weight:700});region(key,x+3,top,width-6,disabled,()=>{if(!selected)this.bridge.dispatch(row,value);this.dirty=true;});});};
+    button('panel',0,this.hidden?'Show panel':'Hide panel',C.accent,C.ground,()=>{this.hidden=!this.hidden;if(!this.hidden)this.recenter();});
+    button('reposition',1,'Reposition avatar',C.surface,C.text,()=>{if(reposition)this.bridge.dispatch(reposition);this.dirty=true;},!reposition||reposition.disabled);
+    segments('mode',2,'Mode',behavior,[['manual','Manual'],['puppet','Puppet']]);
+    segments('collision',3,'Collide',collision,[['room','Room'],['floor','Floor']]);
+    const ORDER=['off','planes','mesh','both','depth'],NAMES={off:'Off',planes:'Room setup',mesh:'Scanned mesh',both:'Setup + scan',depth:'Live depth'},current=ORDER.includes(occlusion?.value)?occlusion.value:'both',next=ORDER[(ORDER.indexOf(current)+1)%ORDER.length];
+    button('occlusion',4,'Occlusion: '+NAMES[current]+'  \u203A',C.surface,C.text,()=>{if(occlusion)this.bridge.dispatch(occlusion,next);this.dirty=true;},!occlusion||occlusion.disabled);
     this.wrist.material.map.needsUpdate=true;
   }
   dispatch(row,value) {const live=this.liveRows?.get(row.key);return this.bridge.dispatch(live?.node||live?.type==='body'?live:row,value);}

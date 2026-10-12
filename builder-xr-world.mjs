@@ -115,15 +115,20 @@ export class XRWorld {
     else this.statusText = meshes || planes ? 'No usable scanned surfaces - floor fallback, no obstacle collision' : 'Room scan unavailable - floor fallback, no obstacle collision';
     if(this.skippedEmpty||this.duplicateSurfaces)this.statusText+=' - '+this.skippedEmpty+' empty, '+this.duplicateSurfaces+' duplicate sources skipped';
     this.updateOcclusion();
-    this.statusText += this.occluders && this.occlusionKinds && !this.occlusionKinds.size ? ' · room occlusion off' : this.occluders ? this.complete && this.hasGeometry ? ' · room occlusion active' : !this.complete ? ' · room occlusion paused' : ' · room occlusion unavailable' : ' · room occlusion unavailable';
+    const occluding = this.occluding || { mesh: 0, plane: 0 };
+    this.occlusionText = this.occluders && this.occlusionKinds && !this.occlusionKinds.size ? 'room occlusion off' : this.occluders && occluding.mesh + occluding.plane ? 'occluding ' + [occluding.plane && occluding.plane + ' setup', occluding.mesh && occluding.mesh + ' scan'].filter(Boolean).join(' + ') : 'room occlusion unavailable';
+    this.statusText += ' · ' + this.occlusionText;
     return this.statusText;
   }
   removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } }
   updateOcclusion() {
     if (!this.occluders) return;
-    this.occluders.visible = (!this.occlusionKinds || this.occlusionKinds.size > 0) && this.complete && this.hasGeometry;
+    // Each posed surface occludes on its own; an incomplete scan pauses movement but must not switch occlusion off (that made every source look identical).
+    this.occluders.visible = (!this.occlusionKinds || this.occlusionKinds.size > 0) && this.hasGeometry;
+    this.occluding = { mesh: 0, plane: 0 };
     for (const entry of this.entries.values()) {
       const shown = entry.active && (!this.occlusionKinds || this.occlusionKinds.has(entry.kind));
+      if (shown && this.occluders.visible) this.occluding[entry.kind]++;
       if (this.occluders.visible && shown && !entry.occluder) {
         entry.occluder = new THREE.Mesh(entry.geometry, this.occlusionMaterial);
         entry.occluder.matrixAutoUpdate = false; entry.occluder.renderOrder = -1000; this.occluders.add(entry.occluder);
