@@ -4,7 +4,19 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `77c817dca138`. The Puppet T-pose/hand/upper-body fixes, native strafe correction, Floor-only collision choice, landing timing, grip removal and stretch-to-fly gestures described below are published. The earlier `a5560d669817` companion version is superseded. The production UI loaded in a real browser with the new version, readable UTF-8 text, hidden non-XR scene settings and no console errors. All 610 release resources passed hosted HTTP/MIME/SHA checks with zero redirects/mismatches (40,940,912 bytes).
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `6c23a0d23dcf` (12 October 2026, second release of the day). It adds the corrections in [Release 6c23a0d23dcf](#release-6c23a0d23dcf) on top of `77c817dca138`. The 7 changed runtime files were uploaded dependencies-first with `builder.html` last; all 20 builder runtime files then matched local SHA-256 with HTTP 200, correct MIME and zero redirects, and the live page loaded in headless Edge (SwiftShader WebGL) with GPU and `?cpu-skinning` modes and no console errors other than the absent favicon.
+
+**Previous release `77c817dca138`:** the Puppet T-pose/hand/upper-body fixes, native strafe correction, Floor-only collision choice, landing timing, grip removal and stretch-to-fly gestures described below. All 610 release resources passed hosted HTTP/MIME/SHA checks then (40,940,912 bytes).
+
+## Release 6c23a0d23dcf
+
+- **Puppet hands:** hands now follow the absolute WebXR grip frame (spec: grip -Z toward the thumb, +Y up the arm, +X out of the right hand's back / -X for the left), mapped onto each rig's measured T-pose hand. The old delta-from-calibration mapping assumed palms down; holding controllers in a T-pose gives palms forward, a constant ~90° wrist error. Verified on both native rigs, direct and mirrored, with palms-forward and palms-down calibration.
+- **Sitting:** `stopWalk()` no longer resets the AR frame clock. Seated frames call it every frame, which froze the pose transition at standing height (floor sit and chair sit). Floor sit now rests the pelvis 6–9 cm above the floor. Seated avatars ignore the right-stick turn.
+- **Performance:** GPU skinning (`SkinnedMesh`, bone texture written by the animation player; CPU positions only on demand via `posedPositions()`), about 5× less animation CPU and no per-frame vertex uploads. `?cpu-skinning` restores the legacy path for A/B checks. Scene → Performance adds render quality (framebuffer scale at session start, live foveation), half-rate animation, room occlusion and avatar shadow toggles and a live fps readout; settings persist per browser. Cheaper Puppet IK and no per-frame duplicate-surface rebuilds from tracking jitter.
+- **VR creator UI:** the headset panel was rebuilt from the "Studio Mirror" design (1 unit = 1 mm of the 0.96 × 1.04 m panel): header family/body switches with Undo/Redo, category rail, 3×3 thumbnail tiles with lock levels, Now wearing strip, hue ring + shade square colour picker, Scene sub-tabs (Modes, Move, Place, Performance, Preview) and a palm-up left-wrist quick menu. It still dispatches only through the native DOM controls. Hover-to-preview from the design is not implemented.
+- **Tests:** `npm test` also runs `tests/native-xr.mjs` (real catalog, rigs and clips in Node): grip orientation, crouch-hold floor sit/stand, seated turn lock and GPU/CPU skin parity.
+
+Unverified on hardware: GPU skinning, wrist-menu palm detection, panel legibility and real frame time on Quest.
 
 **GitHub:** the same tested website snapshot, runnable controller test, this handoff and the Unity parity plan are published to `Ladypoly/AviRev` main. Verify the repository's latest commit before taking ownership. Do not upload this entire workstation parent directory.
 
@@ -22,7 +34,7 @@ The current assignment is the XR fixes, release, and a concrete Unity parity pla
 
 ### Bonto access
 
-The release used Bonto's official CLI (`@sidequestvr/bonto`), with an existing workstation login, because the MCP connector had timed out. The app is `avi-rev`; website uploads go to `v2/<relative path>`. With the CLI available, use `bonto auth status` to check access, and `bonto files upload avi-rev v2/<relative> <local-file>` for reviewed files. Dependencies/assets must precede modules and HTML; then verify the deployed bytes. No credential is stored in this public repository.
+Release `6c23a0d23dcf` used the Bonto MCP connector after the user authorized a device-code login (`upload_file` to `v2/<relative path>`, then curl POST). Release `77c817dca138` used Bonto's official CLI (`@sidequestvr/bonto`), with an existing workstation login, because the MCP connector had timed out. The app is `avi-rev`; website uploads go to `v2/<relative path>`. With the CLI available, use `bonto auth status` to check access, and `bonto files upload avi-rev v2/<relative> <local-file>` for reviewed files. Dependencies/assets must precede modules and HTML; then verify the deployed bytes. No credential is stored in this public repository.
 
 If your session cannot use the authenticated workstation CLI or a working Bonto connector, you cannot publish from that session. Ask the user to connect Bonto, complete `bonto auth login`, or have the existing authorized publisher perform the upload. Do not copy credentials between sessions or invent an alternative deploy identity. Since this correction is already live, lack of Bonto access does not block the next read-only/native parity work. Local packaging helper paths are in the workstation handoff, not this public repository.
 
@@ -79,7 +91,10 @@ The next physical Quest pass must verify:
 4. Jump standing and moving; verify the landing has no pose/root/boot snap. Check low ceiling, tracking interruption and rapid repeat A.
 5. Hold stretch for two seconds: takeoff, release to hover, forward climb, backward descend. Hold backward at floor for two seconds: land without immediately sitting. Verify menus/tracking loss cancel timers.
 6. Grip must never sit/stand. Joystick crouch/sit/stand and panel grabbing must remain usable.
-7. Measure headset frame time with the user's real room scan. Synthetic BVH checks are not a Quest performance measurement.
+7. Measure headset frame time with the user's real room scan (Scene → Performance shows fps). Compare Sharp/Balanced/Fast, occlusion and shadow off, and `?cpu-skinning`. Synthetic BVH checks are not a Quest performance measurement.
+8. Puppet: calibrate with palms forward, then relaxed controller hold; avatar wrists must match the controllers in mirror and direct modes.
+9. Hold crouch 2 s: the avatar sits on the floor, not at hip height; right stick forward stands. Chair sit lands on the seat.
+10. Headset panel: tabs, tiles, colour ring/square drag, Undo/Redo, Scene sub-tabs; turn the left palm up for the wrist menu and use it with the right ray.
 
 ## Confirmed unresolved Unity parity issues
 

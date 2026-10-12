@@ -99,7 +99,7 @@ export class XRWorld {
       entry.inverse.copy(entry.matrix).invert();
       // Only equal triangles in the current reference space share a budget slot; distinct nearby walls stay separate.
       if(entry.triangles<=254){
-        if(!entry.signaturePose?.equals(entry.matrix)){const faces=[];for(let i=0;i<entry.indices.length;i+=3){const vertices=[];for(let j=0;j<3;j++){a.fromArray(entry.positions,entry.indices[i+j]*3).applyMatrix4(entry.matrix);vertices.push(a.toArray().join(','));}faces.push(vertices.sort().join('/'));}entry.signature=JSON.stringify(entry.label)+'|'+faces.sort().join('|');entry.signaturePose=entry.matrix.clone();}
+        if(!entry.signaturePose||entry.signaturePose.elements.some((value,i)=>Math.abs(value-entry.matrix.elements[i])>1e-3)){const faces=[];for(let i=0;i<entry.indices.length;i+=3){const vertices=[];for(let j=0;j<3;j++){a.fromArray(entry.positions,entry.indices[i+j]*3).applyMatrix4(entry.matrix);vertices.push(a.toArray().map(value=>value.toFixed(2)).join(','));}faces.push(vertices.sort().join('/'));}entry.signature=JSON.stringify(entry.label)+'|'+faces.sort().join('|');entry.signaturePose=entry.matrix.clone();}
         if(duplicates.has(entry.signature)){this.duplicateSurfaces++;continue;}duplicates.add(entry.signature);
       }
       if(this.totalTriangles+entry.triangles>MAX_TRIANGLES){this.complete=false;reasons.push('Triangle limit exceeded: '+(this.totalTriangles+entry.triangles)+' (max '+MAX_TRIANGLES+')');continue;}
@@ -113,13 +113,13 @@ export class XRWorld {
     else this.statusText = meshes || planes ? 'No usable scanned surfaces - floor fallback, no obstacle collision' : 'Room scan unavailable - floor fallback, no obstacle collision';
     if(this.skippedEmpty||this.duplicateSurfaces)this.statusText+=' - '+this.skippedEmpty+' empty, '+this.duplicateSurfaces+' duplicate sources skipped';
     this.updateOcclusion();
-    this.statusText += this.occluders ? this.complete && this.hasGeometry ? ' · room occlusion active' : !this.complete ? ' · room occlusion paused' : ' · room occlusion unavailable' : ' · room occlusion unavailable';
+    this.statusText += this.occluders && this.occlusionEnabled === false ? ' · room occlusion off' : this.occluders ? this.complete && this.hasGeometry ? ' · room occlusion active' : !this.complete ? ' · room occlusion paused' : ' · room occlusion unavailable' : ' · room occlusion unavailable';
     return this.statusText;
   }
   removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } }
   updateOcclusion() {
     if (!this.occluders) return;
-    this.occluders.visible = this.complete && this.hasGeometry;
+    this.occluders.visible = this.occlusionEnabled !== false && this.complete && this.hasGeometry;
     for (const entry of this.entries.values()) {
       if (this.occluders.visible && entry.active && !entry.occluder) {
         entry.occluder = new THREE.Mesh(entry.geometry, this.occlusionMaterial);

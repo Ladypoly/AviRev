@@ -2,6 +2,8 @@ import * as THREE from './libs/three/package/build/three.module.js';
 import { postureMatrices, standingKneePole } from './builder-posture.mjs?v=8f0df2f7d92d';
 
 let clipPromise;
+// Global so a restored skin state can never collide with a version cached during capsule sampling.
+let skinVersion = 0;
 let walkPromise, seatPromise, actionPromise;
 let posturePromise;
 export function loadPostureClips(url = new URL('./animation/rpm-postures.json', import.meta.url)) {
@@ -100,11 +102,11 @@ export function createPuppetLayer(family) {
   const finite = values => values.every(Number.isFinite);
   function branch(current, bone, desired, weight) {
     if (!bone || !current.has(bone.path) || weight <= 0) return;
-    const before = new Map([...current].map(([path,matrix])=>[path,matrix.clone()])), original = before.get(bone.path), scale = new THREE.Vector3();
+    // Only the moved subtree is copied; cloning every bone per IK step dominated Puppet frame cost.
+    const original = current.get(bone.path).clone(), before = new Map([[bone.path, original]]), scale = new THREE.Vector3();
     original.decompose(new THREE.Vector3(),new THREE.Quaternion(),scale);
     current.set(bone.path,new THREE.Matrix4().compose(positionOf(original),quaternionOf(original).slerp(desired,weight),scale));
-    const descendants = new Set([bone.path]);
-    for (const child of order) if (descendants.has(child.parent)) { current.set(child.path,current.get(child.parent).clone().multiply(before.get(child.parent).clone().invert()).multiply(before.get(child.path))); descendants.add(child.path); }
+    for (const child of order) if (before.has(child.parent) && current.has(child.path)) { const old = current.get(child.path).clone(); before.set(child.path, old); current.set(child.path,current.get(child.parent).clone().multiply(before.get(child.parent).clone().invert()).multiply(old)); }
   }
   // Robot binds in A-pose; calibration must use the same true T-pose for both rigs.
   const tPose = new Map([...rest].map(([path,matrix])=>[path,matrix.clone()]));
@@ -173,6 +175,20 @@ export function createPuppetLayer(family) {
     reset() { previous=null;for(const entry of Object.values(entries)){entry.weight=0;entry.target=null;} },
   };
   return layer;
+}
+/** Current posed vertex positions for grounding/seating/framing; GPU-skinned items are skinned here only on request. */
+export function posedPositions(item) {
+  const attribute = item.geometry.getAttribute('position'), skin = item.skin;
+  if (!item.mesh?.isSkinnedMesh || !skin?.base) return attribute.array;
+  if (item.posedVersion === skin.version && item.posed) return item.posed;
+  const base = skin.base, out = item.posed?.length === base.length ? item.posed : new Float32Array(base.length), matrices = skin.matrices.map(matrix => matrix.elements);
+  let influence = 0;
+  for (let vertex = 0, offset = 0; offset < base.length; vertex++, offset += 3) {
+    const count = item.skinCounts[vertex], x = base[offset], y = base[offset + 1], z = base[offset + 2]; let sx = 0, sy = 0, sz = 0, total = 0;
+    for (let k = 0; k < count; k++, influence++) { const weight = item.skinWeights[influence], m = matrices[item.skinIndices[influence]]; if (!weight || !m) continue; sx += weight * (m[0] * x + m[4] * y + m[8] * z + m[12]); sy += weight * (m[1] * x + m[5] * y + m[9] * z + m[13]); sz += weight * (m[2] * x + m[6] * y + m[10] * z + m[14]); total += weight; }
+    if (total) { out[offset] = sx / total; out[offset + 1] = sy / total; out[offset + 2] = sz / total; } else { out[offset] = x; out[offset + 1] = y; out[offset + 2] = z; }
+  }
+  item.posed = out; item.posedVersion = skin.version; return out;
 }
 function anatomicalFrame(direction, palmNormal) {
   const y = direction.clone().normalize(), x = palmNormal.clone().addScaledVector(y, -palmNormal.dot(y)).normalize();
@@ -528,6 +544,13 @@ export function createIdlePlayer(family, config, library, initialClip) {
       for (const item of items) {
         const saved = originals.get(item); if (!saved) continue;
         const matrices = (item.definition.bones || []).map((bone, index) => reflection.clone().multiply((pose.get(bone.path) || new THREE.Matrix4().fromArray(bone.matrix)).clone().multiply(saved.inverse[index])).multiply(reflection));
+        const skeleton = item.mesh?.isSkinnedMesh ? item.mesh.skeleton : null;
+        if (skeleton && matrices.length) {
+          // GPU skinning: upload bone matrices only; CPU positions are skinned lazily by posedPositions().
+          for (let index = 0; index < matrices.length; index++) matrices[index].toArray(skeleton.boneMatrices, index * 16);
+          skeleton.boneTexture.needsUpdate = true; item.skin = { matrices, base: saved.attributes.position, version: ++skinVersion };
+          continue;
+        }
         const normalMatrices = matrices.map(matrix => new THREE.Matrix3().getNormalMatrix(matrix).elements);
         // Exported rigid vertices already include sourceMatrix in root space. Apply only their parent pose delta.
         const rigidMatrix = saved.rigidParent ? reflection.clone().multiply(pose.get(saved.rigidParent).clone().multiply(saved.rigidInverse)).multiply(reflection) : null;

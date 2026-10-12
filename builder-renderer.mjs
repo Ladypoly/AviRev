@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer } from './builder-animation.mjs?v=08f678826fa7';
+import { loadWalkClips, loadSeatClips, loadActionClips, loadPostureClips, loadFullMovementClip, createPuppetLayer, posedPositions } from './builder-animation.mjs?v=686a11c7f747';
 import { OrbitControls } from './libs/three/package/examples/jsm/controls/OrbitControls.js';
 import { assetBytes, assetPath, typedArray, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
 import { createMaterial, updateMaterial, loadTexture, releaseUnusedTextures } from './builder-shaders.mjs?v=7c5c6c7160c1';
@@ -18,6 +18,24 @@ export function seatedBodyContact(pelvis, positions) {
   // One centimetre allows cushion/close-fitting cloth clearance; loose garments are not chair collision geometry.
   point.y = Number.isFinite(underside) ? underside - .01 : pelvis.y - .07;
   return point;
+}
+/** GPU skin for native Unity weights (max 4 per vertex). Bone matrices are written by the animation player; zero-weight vertices use an extra identity bone like the CPU path. */
+export function gpuSkeleton(geometry, definition, counts, indices, weights) {
+  const boneCount = definition.bones?.length || 0, vertexCount = geometry.getAttribute('position').count;
+  if (!boneCount || counts?.length !== vertexCount || !indices?.length || !weights?.length) return null;
+  const skinIndex = new Uint16Array(vertexCount * 4), skinWeight = new Float32Array(vertexCount * 4);
+  let influence = 0;
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    const count = counts[vertex], at = vertex * 4; let total = 0;
+    if (count > 4) return null;
+    for (let k = 0; k < count; k++, influence++) { const weight = weights[influence]; if (!weight || indices[influence] >= boneCount) continue; skinIndex[at + k] = indices[influence]; skinWeight[at + k] = weight; total += weight; }
+    if (total > 0) for (let k = 0; k < 4; k++) skinWeight[at + k] /= total; else { skinIndex[at] = boneCount; skinWeight[at] = 1; }
+  }
+  geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4)); geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
+  const bones = Array.from({ length: boneCount + 1 }, () => new THREE.Bone()), skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
+  for (let i = 0; i < bones.length; i++) new THREE.Matrix4().toArray(skeleton.boneMatrices, i * 16);
+  skeleton.computeBoneTexture(); skeleton.update = () => {};
+  return skeleton;
 }
 export function focusSlice(kind, h, floor, head, eyes, neck, top) {
   h = Math.max(.4, h);
@@ -65,7 +83,7 @@ export function correctLegacyBakedScale(definition, positions, normals, tangents
 }
 export class AvatarRenderer {
   constructor(element, data) {
-    this.element = element; this.data = data; this.cache = new Map(); this.instances = new Map(); this.materials = new Map(); this.materialInstances = new Map(); this.token = 0; this.report = []; this.active = []; this.view = 'threequarter'; this.focusKind = 'Body'; this.idlePlaying = true;
+    this.element = element; this.data = data; this.cache = new Map(); this.instances = new Map(); this.materials = new Map(); this.materialInstances = new Map(); this.token = 0; this.report = []; this.active = []; this.view = 'threequarter'; this.focusKind = 'Body'; this.idlePlaying = true; this.gpuSkinning = !new URLSearchParams(globalThis.location?.search || '').has('cpu-skinning');
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); this.renderer.outputColorSpace = THREE.SRGBColorSpace; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1;
     element.append(this.renderer.domElement); this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#20242d');
@@ -83,7 +101,7 @@ export class AvatarRenderer {
     this.wireMaterial = new THREE.MeshBasicMaterial({ color: 0x181d20, wireframe: true, transparent: true, opacity: .34, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
     this.cutMaterial = new THREE.MeshBasicMaterial({ color: 0xe644aa, transparent: true, opacity: .55, depthWrite: false, side: THREE.DoubleSide });
     new ResizeObserver(() => this.resize()).observe(element); this.resize();
-    this.renderer.setAnimationLoop((time, frame) => { this.ar?.update(frame, time / 1000); this.puppetLayer?.update(time / 1000); this.animationPlayer()?.update(time / 1000, this.active); this.ar?.refreshPoseGround?.(); if (!this.ar?.session) this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop((time, frame) => { this.ar?.update(frame, time / 1000); this.puppetLayer?.update(time / 1000); this.renderFrame = (this.renderFrame || 0) + 1; if (this.renderFrame % (this.animationStride || 1) === 0) this.animationPlayer()?.update(time / 1000, this.active); this.ar?.refreshPoseGround?.(); if (!this.ar?.session) this.controls.update(); this.renderer.render(this.scene, this.camera); });
   }
   puppetReference() {
     const family = this.currentFamily, pose = this.puppetLayer?.referencePose();
@@ -91,7 +109,16 @@ export class AvatarRenderer {
     this.puppetLayer.reset(); this.puppetLayer.captureReference(pose);
     const result = {height:standingHeight(family.skeleton.find(bone=>bone.name===(family.Family==='human'?'head.x':'Head'))?.matrix[13],this.bounds?.max.y||1.7),signature:this.idleSignature};
     const reflection=new THREE.Matrix4().makeScale(-1,1,1);
-    for(const [name,human,robot]of [['head','head.x','Head'],['leftHand','hand.l','LeftHand'],['rightHand','hand.r','RightHand']]){const bone=family.skeleton.find(row=>row.name===(family.Family==='human'?human:robot)),matrix=bone&&pose.get(bone.path);if(!matrix)return null;const reflected=reflection.clone().multiply(matrix).multiply(reflection),position=new THREE.Vector3(),quaternion=new THREE.Quaternion();reflected.decompose(position,quaternion,new THREE.Vector3());result[name]={position,quaternion:quaternion.normalize()};}
+    const browserPoint=(human,robot)=>{const bone=family.skeleton.find(row=>row.name===(family.Family==='human'?human:robot)),matrix=bone&&pose.get(bone.path);return matrix?new THREE.Vector3().setFromMatrixPosition(matrix).multiply(new THREE.Vector3(-1,1,1)):null;};
+    for(const [name,human,robot]of [['head','head.x','Head'],['leftHand','hand.l','LeftHand'],['rightHand','hand.r','RightHand']]){const bone=family.skeleton.find(row=>row.name===(family.Family==='human'?human:robot)),matrix=bone&&pose.get(bone.path);if(!matrix)return null;const reflected=reflection.clone().multiply(matrix).multiply(reflection),position=new THREE.Vector3(),quaternion=new THREE.Quaternion();reflected.decompose(position,quaternion,new THREE.Vector3());result[name]={position,quaternion:quaternion.normalize()};
+      if(name==='head')continue;
+      // WebXR grip frame a controller would have in this T-pose hand: -Z toward the thumb, +Y up the arm, +X out of the right hand's back (-X for the left).
+      const side=name==='leftHand'?'l':'r',prefix=side==='l'?'Left':'Right',middle=browserPoint('c_middle1.'+side,prefix+'HandMiddle1'),index=browserPoint('c_index1.'+side,prefix+'HandIndex1'),pinky=browserPoint('c_pinky1.'+side,prefix+'HandPinky1');
+      if(!middle||!index||!pinky)continue;
+      const aim=middle.sub(position).normalize(),across=index.sub(pinky);across.addScaledVector(aim,-across.dot(aim)).normalize();
+      if(!aim.toArray().concat(across.toArray()).every(Number.isFinite)||across.lengthSq()<.5)continue;
+      const back=side==='l'?across.clone().cross(aim):aim.clone().cross(across),x=side==='l'?back.negate():back;
+      result[name].grip=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,aim.clone().negate(),across.clone().negate())).normalize();}
     return result;
   }
   setPuppetMode(value) {
@@ -153,12 +180,12 @@ export class AvatarRenderer {
   }
   captureMotionCapsule(mode) {
     const box = new THREE.Box3(), contacts = this.active.filter(item => item.definition.name === this.currentBody || item.definition.name.startsWith('RobotBody_') || ['RobotHands','RobotHead','RobotFace'].includes(item.definition.name) || /^(shoes_|RobotShoe)/.test(item.definition.name));
-    const point = new THREE.Vector3(),saved=contacts.map(item=>({item,attributes:Object.fromEntries(['position','normal','tangent'].filter(name=>item.geometry.getAttribute(name)).map(name=>[name,item.geometry.getAttribute(name).array.slice()])),box:item.geometry.boundingBox?.clone(),sphere:item.geometry.boundingSphere?.clone()}));
+    const point = new THREE.Vector3(),saved=contacts.map(item=>({item,skin:item.skin,bones:item.mesh?.skeleton?.boneMatrices.slice(),attributes:Object.fromEntries(['position','normal','tangent'].filter(name=>item.geometry.getAttribute(name)).map(name=>[name,item.geometry.getAttribute(name).array.slice()])),box:item.geometry.boundingBox?.clone(),sphere:item.geometry.boundingSphere?.clone()}));
     try { for (const name of mode==='fly'?Object.keys(this.actionPlayers).filter(name=>name.startsWith('fly')):[mode,mode+'Idle']) {
       const player = this.actionPlayers[name];
       const samples=this.actionClips[name]?.[this.currentConfig.BodyType]?.[0]?.staticSourcePose?1:32;
-      for (let sample=0;sample<samples;sample++) { player.sampleGeometry(sample/samples*player.report.duration,contacts); const poseBox = new THREE.Box3(); for(const item of contacts){const positions=item.geometry.getAttribute('position');for(let i=0;i<positions.count;i++)poseBox.expandByPoint(point.fromBufferAttribute(positions,i));} if(!poseBox.isEmpty()){const floor=poseBox.min.y-.01;poseBox.min.y-=floor;poseBox.max.y-=floor;box.union(poseBox);} }
-    } } finally { for(const {item,attributes,box,sphere} of saved){for(const [name,array]of Object.entries(attributes)){const attribute=item.geometry.getAttribute(name);attribute.array.set(array);attribute.needsUpdate=true;}item.geometry.boundingBox=box||null;item.geometry.boundingSphere=sphere||null;} }
+      for (let sample=0;sample<samples;sample++) { player.sampleGeometry(sample/samples*player.report.duration,contacts); const poseBox = new THREE.Box3(); for(const item of contacts){const positions=posedPositions(item);for(let i=0;i<positions.length;i+=3)poseBox.expandByPoint(point.fromArray(positions,i));} if(!poseBox.isEmpty()){const floor=poseBox.min.y-.01;poseBox.min.y-=floor;poseBox.max.y-=floor;box.union(poseBox);} }
+    } } finally { for(const {item,skin,bones,attributes,box,sphere} of saved){if(bones){item.mesh.skeleton.boneMatrices.set(bones);item.mesh.skeleton.boneTexture.needsUpdate=true;item.skin=skin;}for(const [name,array]of Object.entries(attributes)){const attribute=item.geometry.getAttribute(name);attribute.array.set(array);attribute.needsUpdate=true;}item.geometry.boundingBox=box||null;item.geometry.boundingSphere=sphere||null;} }
     if (box.isEmpty()) throw new Error('Movement body bounds unavailable.');
     const size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3()),horizontal=size.z>size.y,radius=Math.max(size.x,horizontal?size.y:size.z)/2+.01,height=Math.max(size.y+.02,2*radius+.006);
     const offset=new THREE.Vector3(center.x,0,center.z),envelope=box.clone().translate(offset.clone().negate()).expandByScalar(.01);envelope.min.y=Math.max(.001,envelope.min.y);
@@ -170,7 +197,7 @@ export class AvatarRenderer {
   motionGroundAnchor() {
     if (!['crawl','fly'].includes(this.motionAction)) return null;
     let lowest = Infinity;
-    for (const item of this.active) if (item.definition.name === this.currentBody || item.definition.name.startsWith('RobotBody_') || ['RobotHands','RobotHead','RobotFace'].includes(item.definition.name) || /^(shoes_|RobotShoe)/.test(item.definition.name)) { const positions = item.geometry.getAttribute('position').array; for (let i=1;i<positions.length;i+=3) lowest = Math.min(lowest, positions[i]); }
+    for (const item of this.active) if (item.definition.name === this.currentBody || item.definition.name.startsWith('RobotBody_') || ['RobotHands','RobotHead','RobotFace'].includes(item.definition.name) || /^(shoes_|RobotShoe)/.test(item.definition.name)) { const positions = posedPositions(item); for (let i=1;i<positions.length;i+=3) lowest = Math.min(lowest, positions[i]); }
     return Number.isFinite(lowest) ? new THREE.Vector3(0, lowest - .01, 0) : null;
   }
   setJumpPhase(fraction) { const player = this.actionPlayers?.jump; if (this.motionAction === 'jump' && player) player.phase = Math.min(.999, Math.max(0, fraction)) * player.report.duration; }
@@ -244,9 +271,9 @@ export class AvatarRenderer {
     if (!matrix) throw new Error('The floor-seated pelvis is unavailable.');
     const point = new THREE.Vector3().setFromMatrixPosition(matrix); point.x *= -1;
     const body = this.active.find(item => this.currentFamily.Family === 'robot' ? item.definition.name.startsWith('RobotBody_') : item.definition.name === this.currentBody);
-    const contact = seatedBodyContact(point, body?.geometry.getAttribute('position').array);
+    const contact = seatedBodyContact(point, body && posedPositions(body));
     for (const item of this.active) if (item === body || /^(shoes_|RobotShoe)/.test(item.definition.name)) {
-      const positions = item.geometry.getAttribute('position').array;
+      const positions = posedPositions(item);
       for (let i = 1; i < positions.length; i += 3) contact.y = Math.min(contact.y, positions[i] - .01);
     }
     return contact;
@@ -256,7 +283,7 @@ export class AvatarRenderer {
     if (!matrix) throw new Error('The seated pelvis is unavailable.');
     const point = new THREE.Vector3().setFromMatrixPosition(matrix); point.x *= -1;
     const body = this.active.find(item => this.currentFamily.Family === 'robot' ? item.definition.name.startsWith('RobotBody_') : item.definition.name === this.currentBody);
-    return seatedBodyContact(point, body?.geometry.getAttribute('position').array);
+    return seatedBodyContact(point, body && posedPositions(body));
   }
   setAPose(value) { this.aPose = !!value; if (this.aPose && this.ar?.session) this.ar.stopMotion(); this.idlePlayer?.setAPose(this.aPose); this.idlePlayer?.update(performance.now() / 1000, this.active); this.frame(); }
   focus(kind) { this.focusKind = ['Body', 'Head', 'Face', 'Bust', 'Feet'].includes(kind) ? kind : 'Body'; }
@@ -285,10 +312,12 @@ export class AvatarRenderer {
         for (const [name, values] of [['position', positions], ['normal', normals], ['tangent', tangents]]) if (values) geometry.getAttribute(name).array.set(values);
         if (!normals) geometry.computeVertexNormals();
       }
-      const mesh = new THREE.Mesh(geometry, materialList); mesh.name = definition.name;
-      const wire = new THREE.Mesh(geometry, this.wireMaterial); wire.visible = !!this.wire; mesh.add(wire);
-      const cuts = new THREE.Mesh(new THREE.BufferGeometry(), this.cutMaterial); cuts.visible = !!this.cuts; mesh.add(cuts);
-      const result = { definition, geometry, positions, normals, tangents, parts, displayParts, morphs, mesh, wire, cuts, materials: materialList, skinCounts: array('bonesPerVertex'), skinIndices: array('allSkinIndices'), skinWeights: array('allSkinWeights') };
+      const skinCounts = array('bonesPerVertex'), skinIndices = array('allSkinIndices'), skinWeights = array('allSkinWeights'), skeleton = this.gpuSkinning !== false ? gpuSkeleton(geometry, definition, skinCounts, skinIndices, skinWeights) : null;
+      const part = (geometry, material) => { if (!skeleton) return new THREE.Mesh(geometry, material); const node = new THREE.SkinnedMesh(geometry, material); node.bindMode = THREE.DetachedBindMode; node.bind(skeleton, new THREE.Matrix4()); node.frustumCulled = false; return node; };
+      const mesh = part(geometry, materialList); mesh.name = definition.name;
+      const wire = part(geometry, this.wireMaterial); wire.visible = !!this.wire; mesh.add(wire);
+      const cuts = part(new THREE.BufferGeometry(), this.cutMaterial); cuts.visible = !!this.cuts; mesh.add(cuts);
+      const result = { definition, geometry, positions, normals, tangents, parts, displayParts, morphs, mesh, wire, cuts, materials: materialList, skinCounts, skinIndices, skinWeights };
       const headPath = family.skeleton?.find(bone => ['head.x', 'Head'].includes(bone.name))?.path, headVertices = [];
       if (headPath && result.skinCounts?.length) { let influence = 0; for (let vertex = 0; vertex < count; vertex++) { let strongest = -1, weight = -1; for (let i = 0; i < result.skinCounts[vertex]; i++, influence++) if (result.skinWeights[influence] > weight) { weight = result.skinWeights[influence]; strongest = result.skinIndices[influence]; } const path = definition.bones?.[strongest]?.path; if (path === headPath || path?.startsWith(headPath + '/')) headVertices.push(vertex); } }
       else if (headPath && definition.path?.startsWith(headPath + '/')) for (let vertex = 0; vertex < count; vertex++) headVertices.push(vertex);
@@ -319,7 +348,7 @@ export class AvatarRenderer {
       if (item.definition.name === request.BodyMesh) {
         const indices = new Uint32Array(item.parts.reduce((sum, part) => sum + part.length, 0)); let at = 0; for (const part of item.parts) { indices.set(part, at); at += part.length; }
         const hidden = coverageFor(family, request.MeshNames, indices, this.data); hiddenCount += hidden.reduce((sum, value) => sum + value, 0); this.setIndices(item, cullTriangles(item.displayParts, hidden));
-        const excluded = cullTriangles(item.displayParts, Uint8Array.from(hidden, value => 1 - value)); const cutIndices = Uint32Array.from(excluded.flatMap(part => [...part])); item.cuts.geometry.setAttribute('position', item.geometry.getAttribute('position')); item.cuts.geometry.setIndex(new THREE.BufferAttribute(cutIndices, 1));
+        const excluded = cullTriangles(item.displayParts, Uint8Array.from(hidden, value => 1 - value)); const cutIndices = Uint32Array.from(excluded.flatMap(part => [...part])); item.cuts.geometry.setAttribute('position', item.geometry.getAttribute('position')); for (const name of ['skinIndex', 'skinWeight']) if (item.geometry.getAttribute(name)) item.cuts.geometry.setAttribute(name, item.geometry.getAttribute(name)); item.cuts.geometry.setIndex(new THREE.BufferAttribute(cutIndices, 1));
       } else this.setIndices(item, item.displayParts);
       item.wire.visible = !!this.wire; item.cuts.visible = !!this.cuts; this.group.add(item.mesh); vertices += item.positions.length / 3; triangles += item.geometry.index.count / 3;
     }
@@ -340,11 +369,11 @@ export class AvatarRenderer {
   }
   frame(view = this.view) {
     if (this.ar?.session) return;
-    this.view = view; for (const item of this.active) item.geometry.computeBoundingBox(); const box = new THREE.Box3().setFromObject(this.group); if (box.isEmpty()) return;
+    this.view = view; const box = this.posedBounds(); if (box.isEmpty()) return;
     const floor = box.min.y, pose = this.idlePlayer?.pose();
     const bone = names => { const row = this.currentFamily?.skeleton?.find(item => names.includes(item.name)), matrix = row && (pose?.get(row.path)?.elements || row.matrix); return matrix ? new THREE.Vector3(-matrix[12], matrix[13], matrix[14]) : null; };
     const measuredHead = bone(['head.x', 'Head']), height = standingHeight(measuredHead?.y, box.max.y), head = measuredHead || new THREE.Vector3(0, floor + height * .87, 0), eyes = bone(['c_eye.l', 'LeftEye']) || head.clone().add(new THREE.Vector3(0, height * .05, 0)), neck = bone(['neck.x', 'Neck']) || head.clone().add(new THREE.Vector3(0, -height * .05, 0));
-    let headTop = -Infinity; for (const item of this.active) { const positions = item.geometry.getAttribute('position').array; for (const vertex of item.headVertices) headTop = Math.max(headTop, positions[vertex * 3 + 1]); }
+    let headTop = -Infinity; for (const item of this.active) { const positions = posedPositions(item); for (const vertex of item.headVertices) headTop = Math.max(headTop, positions[vertex * 3 + 1]); }
     const framing = focusSlice(this.focusKind, height, floor, head.y, eyes.y, neck.y, Number.isFinite(headTop) ? headTop : box.max.y);
     if (this.focusKind === 'Body') { const size = box.getSize(new THREE.Vector3()); framing.center = box.getCenter(new THREE.Vector3()).y; framing.height = Math.max(framing.height, size.y * 1.1); framing.width = Math.max(framing.width, size.x, size.z); }
     const center = new THREE.Vector3(0, framing.center, 0), slice = Math.max(framing.height, framing.width / this.camera.aspect);
@@ -352,6 +381,13 @@ export class AvatarRenderer {
     const distance = slice / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.08;
     const directions = { front: [0, .03, 1], threequarter: [.55, .08, 1], side: [1, .03, 0], back: [0, .03, -1] };
     this.camera.position.copy(center).add(new THREE.Vector3(...directions[view]).normalize().multiplyScalar(distance)); this.camera.near = Math.max(.001, distance / 1000); this.camera.far = distance * 100; this.camera.updateProjectionMatrix(); this.controls.update();
+  }
+  posedPositions(item) { return posedPositions(item); }
+  /** Posed bounds in group-parent space; GPU-skinned geometry attributes stay in bind pose. */
+  posedBounds() {
+    const box = new THREE.Box3(), point = new THREE.Vector3(); this.group.updateMatrixWorld(true);
+    for (const item of this.active) { const positions = posedPositions(item), matrix = item.mesh.matrixWorld; for (let i = 0; i < positions.length; i += 3) box.expandByPoint(point.fromArray(positions, i).applyMatrix4(matrix)); }
+    return box;
   }
   overlays(wire, cuts) { this.wire = wire; this.cuts = cuts; for (const item of this.active) { item.wire.visible = wire; item.cuts.visible = cuts; } }
   snapshot() { this.renderer.render(this.scene, this.camera); return this.renderer.domElement.toDataURL('image/png'); }

@@ -1,6 +1,6 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { AvatarMovementMotor } from './builder-movement.mjs?v=e772e5919b76';
-import { XRWorld } from './builder-xr-world.mjs?v=79763f1afee3';
+import { XRWorld } from './builder-xr-world.mjs?v=57210c1289a9';
 import { AvatarFollower } from './builder-follow.mjs?v=9cb113ed3702';
 
 export function floorCandidate(matrix, viewer, floorY = null) {
@@ -12,6 +12,10 @@ export function seatCandidate(matrix, viewer, floorY) {
   const point = floorCandidate(matrix, viewer);
   return point && (floorY === null || point.y - floorY >= .2 && point.y - floorY <= 1.1) ? point : null;
 }
+
+const PERFORMANCE_KEY='avirev.xr-performance.v1';
+// Resolution is fixed per WebXR session; foveation, shadows, occlusion and animation rate change live.
+const QUALITY={sharp:{scale:1,foveation:.3,shadowMap:1024},balanced:{scale:.85,foveation:.7,shadowMap:1024},fast:{scale:.7,foveation:1,shadowMap:512}};
 
 /** Uses the current avatar and materials directly; camera access starts only on the AR button. */
 export class AvatarAR {
@@ -31,7 +35,17 @@ export class AvatarAR {
     if (ui.seatHeight) ui.seatHeight.oninput = () => this.setSeatHeight(ui.seatHeight.value);
     ui.size.oninput=()=>{this.setSize();this.checkPlacementClearance();};
     ui.controls.addEventListener('beforexrselect', event => event.preventDefault());
+    this.loadPerformance();
+    for(const name of ['quality','animationRate','occlusion','shadows'])if(ui[name])ui[name].onchange=()=>{this.applyPerformance();this.savePerformance();if(name==='quality'&&this.session)this.message('Foveation changed now. Resolution changes the next time you enter WebXR.');};
     this.available = this.checkSupport();
+  }
+  performance(){const quality=QUALITY[this.ui.quality?.value]||QUALITY.balanced;return{...quality,stride:this.ui.animationRate?.value==='2'?2:1,occlusion:this.ui.occlusion?.checked!==false,shadows:this.ui.shadows?.checked!==false};}
+  loadPerformance(){let saved=null;try{saved=JSON.parse(localStorage.getItem(PERFORMANCE_KEY)||'null');}catch{saved=null;}if(!saved||typeof saved!=='object')return;if(this.ui.quality&&QUALITY[saved.quality])this.ui.quality.value=saved.quality;if(this.ui.animationRate&&['1','2'].includes(String(saved.animationRate)))this.ui.animationRate.value=String(saved.animationRate);if(this.ui.occlusion&&typeof saved.occlusion==='boolean')this.ui.occlusion.checked=saved.occlusion;if(this.ui.shadows&&typeof saved.shadows==='boolean')this.ui.shadows.checked=saved.shadows;}
+  savePerformance(){try{localStorage.setItem(PERFORMANCE_KEY,JSON.stringify({quality:this.ui.quality?.value,animationRate:this.ui.animationRate?.value,occlusion:this.ui.occlusion?.checked!==false,shadows:this.ui.shadows?.checked!==false}));}catch{/* Settings still apply for this visit. */}}
+  applyPerformance(){
+    const settings=this.performance(),renderer=this.owner.renderer;this.owner.animationStride=settings.stride;
+    if(this.world){this.world.occlusionEnabled=settings.occlusion;this.world.updateOcclusion?.();}
+    if(this.session){renderer.xr.setFoveation?.(settings.foveation);renderer.shadowMap.enabled=settings.shadows;if(this.shadowLight){this.shadowLight.castShadow=settings.shadows;if(this.shadowLight.shadow.mapSize.x!==settings.shadowMap){this.shadowLight.shadow.mapSize.set(settings.shadowMap,settings.shadowMap);this.shadowLight.shadow.map?.dispose();this.shadowLight.shadow.map=null;}}if(this.shadow)this.shadow.material.visible=settings.shadows;}
   }
   setBehavior(mode){
     if(!['manual','puppet','follow'].includes(mode))return;
@@ -64,7 +78,10 @@ export class AvatarAR {
     // Recenter physical room walking without turning the calibrated hand frame with head gaze.
     if(travel.length()>.25){c.origin.addScaledVector(travel.clone().addScaledVector(travel.clone().normalize(),-.15),1-Math.exp(-8*elapsed));const remaining=sample.head.position.clone().sub(c.origin).setY(0);if(remaining.length()>.35)c.origin.addScaledVector(remaining.clone().addScaledVector(remaining.clone().normalize(),-.35),1);}
     const recenter=c.origin.clone().sub(c.neutral.head.position).setY(0),mirrored=this.ui.mirror?.checked!==false,targets={weight:1};
-    for(const name of ['head','leftHand','rightHand']){const source=mirrored&&name!=='head'?name==='leftHand'?'rightHand':'leftHand':name;const delta=sample[source].position.clone().sub(c.neutral[source].position).sub(recenter).applyQuaternion(c.inverse).multiplyScalar(c.scale),quaternion=c.inverse.clone().multiply(sample[source].quaternion.clone().multiply(c.neutral[source].quaternion.clone().invert())).multiply(c.basis).normalize();if(mirrored){delta.x*=-1;quaternion.y*=-1;quaternion.z*=-1;}if(name==='head'&&delta.length()>.3)delta.setLength(.3);targets[name]={position:c.reference[name].position.clone().add(delta),quaternion};}
+    for(const name of ['head','leftHand','rightHand']){const source=mirrored&&name!=='head'?name==='leftHand'?'rightHand':'leftHand':name;const delta=sample[source].position.clone().sub(c.neutral[source].position).sub(recenter).applyQuaternion(c.inverse).multiplyScalar(c.scale),grip=c.reference[name].grip;
+        // Hands use the absolute WebXR grip frame, so calibration palms (forward or down) cannot offset the wrist.
+        let quaternion=grip?c.inverse.clone().multiply(sample[source].quaternion):c.inverse.clone().multiply(sample[source].quaternion.clone().multiply(c.neutral[source].quaternion.clone().invert())).multiply(c.basis);
+        if(mirrored){delta.x*=-1;quaternion.y*=-1;quaternion.z*=-1;}if(grip)quaternion.multiply(grip.clone().invert());quaternion.normalize();if(name==='head'&&delta.length()>.3)delta.setLength(.3);targets[name]={position:c.reference[name].position.clone().add(delta),quaternion};}
     this.owner.setPuppetTargets?.(targets);this.companionStatus=mirrored?'Puppet · mirrored headset and hands':'Puppet · direct headset and hands';
   }
   message(text) { this.ui.status.hidden = false; this.ui.status.textContent = text; if (this.session && this.headset) { this.runtimeError = text; } }
@@ -87,7 +104,7 @@ export class AvatarAR {
       this.session = session; this.placed = false; this.walkMode = false; this.chooseSeat = false; this.headset = !!this.vrSupported || /Quest|Oculus/i.test(navigator.userAgent); if (this.ui.overlay.dataset) this.ui.overlay.dataset.headset = String(this.headset);
       this.saved = { position: group.position.clone(), quaternion: group.quaternion.clone(), scale: group.scale.clone(), visible: group.visible, background: scene.background, clearAlpha: renderer.getClearAlpha(), cameraPosition: camera.position.clone(), cameraQuaternion: camera.quaternion.clone(), target: controls.target.clone(), controlsEnabled: controls.enabled, xrEnabled: renderer.xr.enabled, shadowsEnabled: renderer.shadowMap.enabled, shadowType: renderer.shadowMap.type, casters: new Map() };
       group.position.set(0, 0, 0); group.quaternion.identity(); group.scale.setScalar(1);
-      const bounds = new THREE.Box3().setFromObject(group);
+      group.updateMatrixWorld(true); const bounds = owner.posedBounds?.() || new THREE.Box3().setFromObject(group);
       this.floor = bounds.min.y; this.height = bounds.max.y - bounds.min.y;
       if (!Number.isFinite(this.floor) || !Number.isFinite(this.height) || this.height <= 0) throw new Error('Wait for the avatar to finish loading.');
       // shortcut: Clipped hair casts a solid silhouette; add matching depth clipping if finer shadow fidelity is needed.
@@ -109,7 +126,10 @@ export class AvatarAR {
       try { await session.requestReferenceSpace('local-floor'); this.floorSpace = true; } catch { /* Phones may provide only local space plus hit testing. */ }
       if (this.session !== session) return;
       renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType(this.floorSpace ? 'local-floor' : 'local');
+      const quality = this.performance(); renderer.xr.setFramebufferScaleFactor?.(quality.scale); renderer.xr.setFoveation?.(quality.foveation);
       await renderer.xr.setSession(session);
+      if (this.session !== session) return;
+      this.applyPerformance();
       if (this.session !== session) return;
       try {
         const viewer = await session.requestReferenceSpace('viewer'), source = await session.requestHitTestSource({ space: viewer });
@@ -182,7 +202,8 @@ export class AvatarAR {
   async toggleWalk() {
     this.motionGeneration++; this.direct = this.directRequest = null; this.owner.setAction?.(null);this.motor.velocity.x=this.motor.velocity.z=0; this.stopWalk(); this.walkMode = false; this.walkButton();
   }
-  stopWalk() { this.destination = null;this.navigationRequest=null; this.lastTime = null; this.owner.setWalking?.(false); this.walkButton(); }
+  // The frame clock is not reset here: seated frames call this every frame, which froze pose transitions at standing height.
+  stopWalk() { this.destination = null;this.navigationRequest=null; this.owner.setWalking?.(false); this.walkButton(); }
   controller(input) {
     if (this.controllers.has(input)) return this.controllers.get(input);
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -3)]), new THREE.LineBasicMaterial({ color: 0x72efcd, transparent: true, depthTest: false, depthWrite: false }));
@@ -316,7 +337,9 @@ export class AvatarAR {
     const elapsed = this.lastTime == null ? 0 : THREE.MathUtils.clamp(seconds - this.lastTime, 0, .1); this.lastTime = seconds;
     const space = this.owner.renderer.xr.getReferenceSpace(); if (!space) return;
     let headPose,view;try{headPose=frame.getViewerPose?.(space);view=headPose?.transform.position;}catch{view=null;}const viewerTracked=!!view&&[view.x,view.y,view.z].every(Number.isFinite),viewer=viewerTracked?new THREE.Vector3(view.x,view.y,view.z):this.owner.renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
-    this.world?.update(frame,space);const roomStatus=this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored.':this.world?.statusText||'';if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
+    // Frame rate is reported once per second so the status text does not force panel redraws every frame.
+    if(elapsed>0){this.frameTimes=(this.frameTimes||0)+elapsed;this.frameCount=(this.frameCount||0)+1;if(this.frameTimes>=1){this.fps=Math.round(this.frameCount/this.frameTimes);this.frameTimes=this.frameCount=0;}}
+    this.world?.update(frame,space);const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored.'+(this.world&&this.world.occlusionEnabled===false?' Room occlusion off.':''):this.world?.statusText||'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
     const inputs = [...(this.session.inputSources || [])], tracked = inputs.filter(input => input.targetRayMode === 'tracked-pointer');
     if (inputs.some(input => input.targetRayMode !== 'screen')) this.headset = true;
     if (this.headset && this.ui.panel && !this.panelStarted) { this.ui.panel.start({session:this.session,scene:this.owner.scene,renderer:this.owner.renderer,avatar:this.owner}); this.panelStarted=true; }
@@ -374,7 +397,7 @@ export class AvatarAR {
     if(!leftTracked){if(this.moveVelocity){this.moveVelocity.x=0;this.moveVelocity.z=0;}this.moveBasis=null;if((this.direct||this.directRequest)&&!['crouch','stretch','crawl','fly'].includes(this.direct||this.directRequest)){this.motionGeneration++;this.direct=this.directRequest=null;this.owner.setAction?.(null);this.owner.setWalking?.(false);}}
     if (!rightTracked) { crouching=stretching=false;this.turnInput=0;this.flightAxis=0;this.flightCrouchHeld=false; }
     this.crouchHeld=crouching;this.stretchHeld=stretching;this.walkIntent=!!move;
-    if(this.turnInput&&this.placed&&viewerTracked){const next=this.owner.group.quaternion.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed)),body=this.bodyCapsule(next);if((body.offset.lengthSq()>0||body.segment)&&this.world&&!this.collisionWorld().canOccupy(this.anchor.clone().add(body.offset),body.height,body.radius,false,null,body.segment))this.turnInput=0;else{this.owner.group.quaternion.copy(next);move?.direction.applyAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed);this.setSize();}}
+    if(this.turnInput&&this.placed&&viewerTracked&&this.canMove()){const next=this.owner.group.quaternion.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed)),body=this.bodyCapsule(next);if((body.offset.lengthSq()>0||body.segment)&&this.world&&!this.collisionWorld().canOccupy(this.anchor.clone().add(body.offset),body.height,body.radius,false,null,body.segment))this.turnInput=0;else{this.owner.group.quaternion.copy(next);move?.direction.applyAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed);this.setSize();}}
     if(!crouching||move||this.turnInput||this.jumpState||this.jumpBusy)this.crouchTime=0;
     if(!crouching)this.floorSitFailed=false;
     if((!crouching&&this.directRequest==='crouch')||(!stretching&&this.directRequest==='stretch')){this.motionGeneration++;this.directRequest=null;}
@@ -440,7 +463,7 @@ export class AvatarAR {
   posePosition(target){
     const transition=this.posePositionTransition;
     if(transition){const t=Math.min(1,transition.age/.6);target=transition.from.clone().lerp(target,t*t*(3-2*t));
-      let low=Infinity;for(const item of this.owner.active||[])if(item.definition.name===this.owner.currentBody||item.definition.name.startsWith('RobotBody_')||/^(shoes_|RobotShoe)/.test(item.definition.name)){const positions=item.geometry.getAttribute('position').array;for(let i=1;i<positions.length;i+=3)low=Math.min(low,positions[i]);}
+      let low=Infinity;for(const item of this.owner.active||[])if(item.definition.name===this.owner.currentBody||item.definition.name.startsWith('RobotBody_')||/^(shoes_|RobotShoe)/.test(item.definition.name)){const positions=this.owner.posedPositions?.(item)||item.geometry.getAttribute('position').array;for(let i=1;i<positions.length;i+=3)low=Math.min(low,positions[i]);}
       if(Number.isFinite(low))target.y=Math.max(target.y,(this.groundY??this.anchor.y)-low*this.owner.group.scale.x);
       if(t>=1)this.posePositionTransition=null;
     }
@@ -466,10 +489,10 @@ export class AvatarAR {
     camera.left = camera.bottom = -radius; camera.right = camera.top = radius; camera.near = .01; camera.far = height * 5; camera.updateProjectionMatrix();
   }
   restore() {
-    this.puppetCalibration=null;this.puppetCalibrationRequested=this.puppetChordHeld=false;this.owner.setPuppetTargets?.(null);this.owner.setPuppetMode?.(false);this.follower?.reset();this.companionStatus=null;this.posePositionTransition=null;this.floorWorld=null;this.stretchTime=this.flightLandTime=0;this.stretchHeld=this.flightCrouchHeld=false;this.runToggled=false;this.world?.restore(); this.world=null; if(this.panelStarted)this.ui.panel?.restore();this.panelStarted=false;this.panelInputs=null;this.moveBasis=null;this.motor.reset();this.moveVelocity=this.motor.velocity;this.crawlMode=this.flightMode=this.flying=false;this.landingBlocked=this.standingBlocked=false;this.modeBusy=false;this.groundY=null;this.jumpBusy=false;this.directDirection=this.directionRequest=null;this.flightAxis=0;this.trackingPaused=false;if(this.ui.roomStatus)this.ui.roomStatus.textContent='';
+    this.puppetCalibration=null;this.puppetCalibrationRequested=this.puppetChordHeld=false;this.owner.setPuppetTargets?.(null);this.owner.setPuppetMode?.(false);this.owner.animationStride=1;this.fps=this.frameTimes=this.frameCount=0;this.follower?.reset();this.companionStatus=null;this.posePositionTransition=null;this.floorWorld=null;this.stretchTime=this.flightLandTime=0;this.stretchHeld=this.flightCrouchHeld=false;this.runToggled=false;this.world?.restore(); this.world=null; if(this.panelStarted)this.ui.panel?.restore();this.panelStarted=false;this.panelInputs=null;this.moveBasis=null;this.motor.reset();this.moveVelocity=this.motor.velocity;this.crawlMode=this.flightMode=this.flying=false;this.landingBlocked=this.standingBlocked=false;this.modeBusy=false;this.groundY=null;this.jumpBusy=false;this.directDirection=this.directionRequest=null;this.flightAxis=0;this.trackingPaused=false;if(this.ui.roomStatus)this.ui.roomStatus.textContent='';
     this.motionGeneration++; this.direct = this.directRequest = null; this.jumpState = null; this.jumpHeight = 0; this.owner.setAction?.(null);
     this.chooseSeat = false; this.seatPoint = null; this.seatMode=null; this.crouchTime=0; this.crouchHeld=false; this.floorSitBusy=false; this.floorSitFailed=false; this.seatBusy=false; this.owner.setSitting?.(false);
-    this.stopWalk(); this.walkMode = false; this.phoneCandidate = null;
+    this.stopWalk(); this.lastTime = null; this.walkMode = false; this.phoneCandidate = null;
     for (const [input, entry] of this.controllers) this.removeController(input, entry);
     this.motionFailures?.clear(); this.runtimeError = null; this.activeRayInput = this.displayRayInput = null; if (this.ui.overlay.dataset) delete this.ui.overlay.dataset.headset;
     this.source?.cancel(); this.source = null; this.session = null; this.placed = false; this.anchor = null;
