@@ -1,6 +1,8 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { MeshBVH, CENTER } from './libs/three-mesh-bvh/index.module.mjs';
 
+// Scanned floors are bumpy (about ±1.5 cm); body volumes start this high so scan noise, rug edges and thresholds never block.
+const STEP_HEIGHT = .04;
 const MAX_TRIANGLES = 250000, MAX_ENTRIES = 128, MAX_VERTICES = 200000, MAX_ROOM_VERTICES = 400000;
 const semanticPriority=label=>/^(table|chair|couch|sofa|bed|desk|cabinet|shelf)$/i.test(label||'')?2:label?1:0;
 const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), closest = new THREE.Vector3(), triangle = new THREE.Triangle();
@@ -113,19 +115,20 @@ export class XRWorld {
     else this.statusText = meshes || planes ? 'No usable scanned surfaces - floor fallback, no obstacle collision' : 'Room scan unavailable - floor fallback, no obstacle collision';
     if(this.skippedEmpty||this.duplicateSurfaces)this.statusText+=' - '+this.skippedEmpty+' empty, '+this.duplicateSurfaces+' duplicate sources skipped';
     this.updateOcclusion();
-    this.statusText += this.occluders && this.occlusionEnabled === false ? ' · room occlusion off' : this.occluders ? this.complete && this.hasGeometry ? ' · room occlusion active' : !this.complete ? ' · room occlusion paused' : ' · room occlusion unavailable' : ' · room occlusion unavailable';
+    this.statusText += this.occluders && this.occlusionKinds && !this.occlusionKinds.size ? ' · room occlusion off' : this.occluders ? this.complete && this.hasGeometry ? ' · room occlusion active' : !this.complete ? ' · room occlusion paused' : ' · room occlusion unavailable' : ' · room occlusion unavailable';
     return this.statusText;
   }
   removeOccluder(entry) { if (entry?.occluder) { entry.occluder.removeFromParent(); entry.occluder = null; } }
   updateOcclusion() {
     if (!this.occluders) return;
-    this.occluders.visible = this.occlusionEnabled !== false && this.complete && this.hasGeometry;
+    this.occluders.visible = (!this.occlusionKinds || this.occlusionKinds.size > 0) && this.complete && this.hasGeometry;
     for (const entry of this.entries.values()) {
-      if (this.occluders.visible && entry.active && !entry.occluder) {
+      const shown = entry.active && (!this.occlusionKinds || this.occlusionKinds.has(entry.kind));
+      if (this.occluders.visible && shown && !entry.occluder) {
         entry.occluder = new THREE.Mesh(entry.geometry, this.occlusionMaterial);
         entry.occluder.matrixAutoUpdate = false; entry.occluder.renderOrder = -1000; this.occluders.add(entry.occluder);
       }
-      if (entry.occluder) { entry.occluder.visible = this.occluders.visible && entry.active; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
+      if (entry.occluder) { entry.occluder.visible = this.occluders.visible && shown; entry.occluder.matrix.copy(entry.matrix); entry.occluder.matrixWorldNeedsUpdate = true; }
     }
   }
   raycast(origin, direction, maxDistance = 4) {
@@ -148,10 +151,10 @@ export class XRWorld {
     if (![...point.toArray(),height,radius].every(Number.isFinite) || height<=0 || radius<=0) return false;
     if (!this.complete && !allowIncomplete) return false;
     if (segment && (![...segment.start.toArray(), ...segment.end.toArray()].every(Number.isFinite))) return false;
-    const envelope=segment?.box,rotation=segment?.rotation;
+    const rotation=segment?.rotation;let envelope=segment?.box;if(envelope&&!envelope.isEmpty()&&envelope.max.y>STEP_HEIGHT*2){envelope=envelope.clone();envelope.min.y=Math.max(envelope.min.y,STEP_HEIGHT);}
     if(envelope&&(!rotation||envelope.isEmpty()||![...envelope.min.toArray(),...envelope.max.toArray(),...rotation.toArray()].every(Number.isFinite)||Math.abs(rotation.lengthSq()-1)>.001))return false;
     const boxMatrix=envelope?new THREE.Matrix4().compose(point,rotation,new THREE.Vector3(1,1,1)):null,boxInverse=boxMatrix?.clone().invert(),bodyCenter=envelope?.getCenter(new THREE.Vector3());
-    const bottom=point.clone().add(segment?.start || new THREE.Vector3(0,radius+.003,0)),top=point.clone().add(segment?.end || new THREE.Vector3(0,Math.max(radius,height-radius),0));
+    const lift=new THREE.Vector3(0,STEP_HEIGHT,0),bottom=point.clone().add(segment?.start?segment.start.clone().add(lift):new THREE.Vector3(0,radius+STEP_HEIGHT,0)),top=point.clone().add(segment?.end?segment.end.clone().add(lift):new THREE.Vector3(0,Math.max(radius+STEP_HEIGHT,height-radius),0));
     let blocked=false,nearest=Infinity;
     for(const entry of this.entries.values()) {
       if(!entry.active)continue;

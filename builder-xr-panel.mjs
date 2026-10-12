@@ -11,11 +11,11 @@ const HELP = {
   'ar-run-mode':'Click to toggle: press the left thumbstick once to run, again to walk. Hold to run: keep it pressed while moving.',
   'ar-quality':'Sharp renders full resolution. Balanced and Fast lower resolution and blur the view edges for a higher frame rate. Resolution changes the next time you enter WebXR; edge blur changes now.',
   'ar-animation-rate':'Every 2nd frame halves avatar animation work. Movement speed stays the same; motion looks slightly less smooth.',
-  'ar-occlusion':'Room occlusion hides avatar parts behind scanned walls and furniture. Turn it off if the avatar disappears wrongly or to save GPU time.',
+  'ar-occlusion':'What hides the avatar behind real things. Room setup uses the walls and furniture boxes from Quest Space Setup; Scanned mesh uses the detailed room scan; Live depth uses the headset depth sensor every frame, so hands and moving objects occlude too (starts the next time you enter WebXR, costs GPU). Off saves GPU time.',
   'ar-shadows':'The soft floor shadow under the avatar. Turning it off saves a shadow render every frame.',
   'ar-crawl':'Enter or leave crawling. Move with the left stick; right stick turns. Standing again needs clear space above the avatar.',
-  'ar-fly':'Hold right-stick forward in the stretch pose for 2 seconds to fly. Keep it forward to rise; pull back to descend. At the lowest floor height, hold back for 2 seconds to land. Left stick moves and strafes; right stick left/right turns.',
-  'ar-sit':'Sit on a scanned seat, or the floor. Hold crouch still for 2 seconds to sit on the floor. Right stick forward stands up.',
+  'ar-fly':'Hold right-stick forward in the stretch pose for 1 second to fly; a ring at the avatar feet fills while you hold. Keep it forward to rise; pull back to descend. Near the floor, hold back for 1 second to land. Left stick moves and strafes; right stick left/right turns.',
+  'ar-sit':'Sit on a scanned seat, or the floor. Hold crouch still for 1 second to sit on the floor. Right stick forward stands up.',
   'ar-size':'Change the avatar size while keeping its feet on the floor. Bigger avatars need more room around and above them.',
   'ar-seat-height':'Set the chair height when no scanned seat is available.',
   'ar-reposition':'Pick a new floor location with the controller placement ring, then press the trigger.',
@@ -31,7 +31,7 @@ const HELP = {
   'random-avatar':'Randomize using the currently available choices and creator rules. Undo brings your previous look back.'
 };
 const SCENE_IDS = ['ar-behavior','ar-mirror','ar-calibrate','ar-run-mode','ar-collision','ar-quality','ar-animation-rate','ar-occlusion','ar-shadows','ar-crawl','ar-fly','ar-sit','ar-walk','ar-turn','ar-reposition','ar-exit','ar-size','ar-seat-height','random-avatar','a-pose','idle','wire','cuts','reset-config','preview-level'];
-const SCENE_LABELS = { 'ar-mirror':'Mirror my movements', 'ar-occlusion':'Room occlusion', 'ar-shadows':'Avatar shadow', 'ar-size':'Avatar size', 'ar-seat-height':'Fallback seat height', idle:'Idle animation', wire:'Wireframe', cuts:'Coverage overlay', 'reset-config':'Reset look' };
+const SCENE_LABELS = { 'ar-mirror':'Mirror my movements', 'ar-occlusion':'Occlusion', 'ar-shadows':'Avatar shadow', 'ar-size':'Avatar size', 'ar-seat-height':'Fallback seat height', idle:'Idle animation', wire:'Wireframe', cuts:'Coverage overlay', 'reset-config':'Reset look' };
 const rowLabel = node => { const title = node.querySelector('.row-title')?.textContent, pick = node.querySelector('.row-pick')?.textContent; return title ? title + (pick ? ' · ' + pick : '') : label(node); };
 const describe = node => ({ key: node.dataset.focusKey || node.id || label(node), label: node.classList?.contains('row-heading') ? rowLabel(node) : label(node), node, disabled: node.disabled, selected: node.getAttribute('aria-pressed') === 'true' || !!node.checked || node.classList?.contains('row-heading') && node.getAttribute('aria-expanded') === 'true', image: node.querySelector('img:not([hidden])'), glyph: node.querySelector('.nav-glyph')?.textContent || '', count: node.querySelector('.nav-count')?.textContent || '', colour: node.style.background || node.dataset.colour || '', type: node.tagName==='SELECT'?'select':node.type === 'range' ? 'range' : 'button', value: node.tagName==='SELECT'?node.value:Number(node.value), options:node.tagName==='SELECT'?[...node.options].filter(option=>!option.disabled).map(option=>({value:option.value,label:option.textContent})):null, min: Number(node.min), max: Number(node.max), step: Number(node.step) || 1, help:HELP[node.id]||node.getAttribute('aria-description')||node.title||'' });
 
@@ -263,9 +263,9 @@ export class XRConfiguratorPanel {
       segmented(rows.get('ar-collision'),{room:'Room',floor:'Floor only'});segmented(rows.get('ar-run-mode'),{toggle:'Click to toggle',hold:'Hold to run'});
     }else if(this.sceneSection==='move'){
       heading('Movement & poses');const w=(width-12)/2;
-      for(const pair of [[['ar-crawl','Left stick moves while crawling.'],['ar-fly','Or hold right stick forward for 2 s.']],[['ar-sit','Or hold crouch still for 2 s.'],['ar-walk','Cancels a pointed destination.']]]){pair.forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));y+=130;}
+      for(const pair of [[['ar-crawl','Left stick moves while crawling.'],['ar-fly','Or hold right stick forward for 1 s.']],[['ar-sit','Or hold crouch still for 1 s.'],['ar-walk','Cancels a pointed destination.']]]){pair.forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));y+=130;}
       this.shape(ctx,x0,y,width,176,20,C.surface);
-      [['LEFT STICK','Walk and strafe · click to run'],['RIGHT STICK','Turn · forward 2 s fly or stand · back 2 s sit'],['A BUTTON','Jump'],['BOTH STICKS','In a T-pose: calibrate Puppet']].forEach(([key,value],index)=>{this.text(ctx,key,x0+24,y+40+index*38,190,20,C.accent,{weight:700});this.text(ctx,value,x0+214,y+40+index*38,width-238,20,C.text);});
+      [['LEFT STICK','Walk and strafe · click to run'],['RIGHT STICK','Turn · forward 1 s fly or stand · back 1 s sit'],['A BUTTON','Jump'],['BOTH STICKS','In a T-pose: calibrate Puppet']].forEach(([key,value],index)=>{this.text(ctx,key,x0+24,y+40+index*38,190,20,C.accent,{weight:700});this.text(ctx,value,x0+214,y+40+index*38,width-238,20,C.text);});
     }else if(this.sceneSection==='place'){
       heading('Placement & size');for(const id of ['ar-size','ar-seat-height']){const row=rows.get(id);if(row&&!row.disabled){this.rangeRow(ctx,row,x0,y,width,88);y+=100;}}
       const w=(width-24)/3;[['ar-turn','For chairs: face the front.'],['ar-reposition','Pick a new floor spot.'],['ar-exit','Back to the browser.']].forEach(([id,detail],index)=>actionCard(rows.get(id),x0+index*(w+12),w,118,detail));
@@ -275,9 +275,10 @@ export class XRConfiguratorPanel {
       this.shape(ctx,x0+24,y+70,width-48,14,7,C.line);if(fps)this.shape(ctx,x0+24,y+70,Math.max(14,(width-48)*Math.min(1,fps/72)),14,7,colourFps);y+=124;
       const quality=rows.get('ar-quality');if(quality){this.text(ctx,'Render quality',x0,y+22,width,20,C.muted);y+=34;const detail={sharp:'Full resolution',balanced:'85% · soft edges',fast:'70% · most edge blur'},w=(width-16)/3;(quality.options||[]).forEach((option,index)=>{const x=x0+index*(w+8),on=quality.value===option.value;this.card(ctx,{key:'quality:'+option.value,x,y,w,h:84,selected:on,fill:C.surface,row:quality,action:()=>this.dispatch(quality,option.value)});this.text(ctx,option.label,x+w/2,y+38,w-20,24,C.text,{align:'center',weight:700});this.text(ctx,detail[option.value]||'',x+w/2,y+66,w-20,18,C.soft,{align:'center'});});y+=100;}
       const half=(width-12)/2,rate=rows.get('ar-animation-rate'),collision=rows.get('ar-collision');
-      switchCard(rows.get('ar-occlusion'),x0,half,{detail:'Hides avatar behind furniture · GPU'});switchCard(rows.get('ar-shadows'),x0+half+12,half,{detail:'Soft floor shadow · GPU'});y+=88;
-      switchCard(rate,x0,half,{on:rate?.value==='2',label:'Half-rate animation',detail:'Halves animation CPU work',action:()=>this.dispatch(rate,rate.value==='2'?'1':'2')});switchCard(collision,x0+half+12,half,{on:collision?.value==='floor',label:'Floor-only collision',detail:'Ignores walls and furniture',action:()=>this.dispatch(collision,collision.value==='floor'?'room':'floor')});y+=88;
-      this.text(ctx,'Render quality changes resolution the next time you enter XR. Everything else applies now.',x0,y+24,width,19,C.muted,{lines:2});
+      segmented(rows.get('ar-occlusion'),{off:'Off',planes:'Room setup',mesh:'Scan',both:'Setup + scan',depth:'Live depth'});
+      switchCard(rows.get('ar-shadows'),x0,half,{detail:'Soft floor shadow · GPU'});switchCard(rate,x0+half+12,half,{on:rate?.value==='2',label:'Half-rate animation',detail:'Halves animation CPU work',action:()=>this.dispatch(rate,rate.value==='2'?'1':'2')});y+=88;
+      switchCard(collision,x0,half,{on:collision?.value==='floor',label:'Floor-only collision',detail:'Ignores walls and furniture',action:()=>this.dispatch(collision,collision.value==='floor'?'room':'floor')});
+      this.text(ctx,'Render quality and Live depth apply the next time you enter XR. Everything else applies now.',x0+half+12,y+30,half,19,C.muted,{lines:2});
     }else{
       heading('Preview & review');const w=(width-12)/2,list=['random-avatar','a-pose','idle','wire','cuts','reset-config'].map(id=>rows.get(id)).filter(Boolean);
       list.forEach((row,index)=>{const x=x0+(index%2)*(w+12);if(index&&index%2===0)y+=88;if(['idle','wire','cuts'].includes(row.key))switchCard(row,x,w);else{this.card(ctx,{key:row.key,x,y,w,h:76,disabled:row.disabled,selected:row.selected,row,action:()=>this.dispatch(row)});this.text(ctx,row.label,x+20,y+46,w-40,22,row.disabled?C.faint:C.text,{weight:700});}});
@@ -303,19 +304,15 @@ export class XRConfiguratorPanel {
   }
   drawWrist() {
     if(!this.wristCanvas)return;
-    const rows=new Map((this.bridge.snapshot('scene').controls||[]).map(row=>[row.key,row])),behavior=rows.get('ar-behavior');
-    const items=[['ar-sit','Sit'],['ar-fly','Fly'],['ar-crawl','Crawl'],['mode',behavior?(behavior.options?.find(option=>option.value===behavior.value)?.label||'Mode'):'Mode'],['random','Surprise'],['recall','Recall']];
-    const signature=JSON.stringify([this.wristHover,this.hidden,items.map(([id,name])=>[id,name,rows.get(id)?.label,rows.get(id)?.disabled])]);if(signature===this.wristSignature)return;this.wristSignature=signature;
+    // The wrist menu has two jobs: show or hide the creator panel, and reposition the avatar.
+    const reposition=(this.bridge.snapshot('scene').controls||[]).find(row=>row.key==='ar-reposition');
+    const signature=JSON.stringify([this.wristHover,this.hidden,reposition?.disabled]);if(signature===this.wristSignature)return;this.wristSignature=signature;
     const ctx=this.wristCanvas.getContext('2d'),scale=512/480;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,512,512);ctx.setTransform(scale,0,0,scale,0,0);
     ctx.beginPath();ctx.arc(240,240,238,0,Math.PI*2);ctx.fillStyle=C.ground;ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=C.line;ctx.stroke();
     this.wristRegions=[];
-    items.forEach(([id,name],index)=>{const angle=-Math.PI/2+index*Math.PI/3,x=240+Math.cos(angle)*160,y=240+Math.sin(angle)*160,row=rows.get(id),disabled=!!row?.disabled,hover=this.wristHover===id;
-      ctx.beginPath();ctx.arc(x,y,56,0,Math.PI*2);ctx.fillStyle=hover&&!disabled?C.selected:disabled?C.locked:C.surface;ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=hover&&!disabled?C.warm:C.line;ctx.stroke();
-      const shortLabel=id.startsWith('ar-')&&row?row.label.split(' ')[0]:name;this.text(ctx,shortLabel,x,y+8,96,24,disabled?C.faint:C.text,{align:'center',weight:700});
-      this.wristRegions.push({id,x,y,r:56,disabled,action:()=>{if(id==='mode'){if(behavior)this.bridge.dispatch(behavior);}else if(id==='random'){const random=this.bridge.snapshot('customize').random;if(random)this.bridge.dispatch(random);}else if(id==='recall'){this.hidden=false;this.recenter();}else if(row)this.bridge.dispatch(row);this.dirty=true;}});});
-    const hover=this.wristHover==='panel';ctx.beginPath();ctx.arc(240,240,70,0,Math.PI*2);ctx.fillStyle=hover?'#B7C0FF':C.accent;ctx.fill();
-    this.text(ctx,'Panel',240,236,120,26,C.ground,{align:'center',weight:700});this.text(ctx,this.hidden?'show':'hide',240,264,120,20,C.ground,{align:'center'});
-    this.wristRegions.push({id:'panel',x:240,y:240,r:70,action:()=>{this.hidden=!this.hidden;if(!this.hidden)this.recenter();}});
+    const button=(id,y,title,detail,fill,ink,action,disabled=false)=>{const hover=this.wristHover===id&&!disabled;this.shape(ctx,70,y,340,150,40,disabled?C.locked:hover?(fill===C.accent?'#B7C0FF':C.selected):fill,hover?C.warm:fill===C.accent?null:C.line,4);this.text(ctx,title,240,y+70,300,40,disabled?C.faint:ink,{align:'center',weight:700});this.text(ctx,detail,240,y+112,300,24,disabled?C.faint:ink,{align:'center'});this.wristRegions.push({id,x:70,y,w:340,h:150,disabled,action});};
+    button('panel',72,this.hidden?'Show panel':'Hide panel',this.hidden?'Opens in front of you':'Hides the creator',C.accent,C.ground,()=>{this.hidden=!this.hidden;if(!this.hidden)this.recenter();});
+    button('reposition',258,'Reposition','Pick a new floor spot',C.surface,C.text,()=>{if(reposition)this.bridge.dispatch(reposition);this.dirty=true;},!reposition||reposition.disabled);
     this.wrist.material.map.needsUpdate=true;
   }
   dispatch(row,value) {const live=this.liveRows?.get(row.key);return this.bridge.dispatch(live?.node||live?.type==='body'?live:row,value);}
@@ -329,7 +326,7 @@ export class XRConfiguratorPanel {
   wristHit(input,frame,space) {
     if(!this.wrist?.visible||input?.handedness!=='right')return null;const ray=this.ray(input,frame,space);if(!ray)return null;
     this.wrist.updateMatrixWorld(true);this.raycaster.set(ray.origin,ray.direction);const hit=this.raycaster.intersectObject(this.wrist)[0];if(!hit?.uv)return null;
-    const x=hit.uv.x*480,y=(1-hit.uv.y)*480,region=(this.wristRegions||[]).find(row=>Math.hypot(x-row.x,y-row.y)<=row.r);return{region,point:hit.point};
+    const x=hit.uv.x*480,y=(1-hit.uv.y)*480,region=(this.wristRegions||[]).find(row=>x>=row.x&&x<=row.x+row.w&&y>=row.y&&y<=row.y+row.h);return{region,point:hit.point};
   }
   ray(input,frame,space) {
     const pose=input?.targetRaySpace&&frame?.getPose?.(input.targetRaySpace,space),values=pose?.transform?.matrix;if(values?.length!==16||!Array.from(values).every(Number.isFinite))return null;

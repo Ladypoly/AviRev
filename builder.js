@@ -1,7 +1,7 @@
 import { assetJSON, assetBytes, cachedLoad } from './builder-assets.mjs?v=c326a7020e52';
 import { AvatarRenderer } from './builder-renderer.mjs?v=ebe01386eb41';
-import { XRConfiguratorPanel, creatorPanelBridge } from './builder-xr-panel.mjs?v=f890ccd57727';
-import { AvatarAR } from './builder-ar.mjs?v=a659dbe85429';
+import { XRConfiguratorPanel, creatorPanelBridge } from './builder-xr-panel.mjs?v=ae21ad314e70';
+import { AvatarAR } from './builder-ar.mjs?v=2582c095ea23';
 import { freshConfig, parseConfig, pick, setFemale, setShape, shapeValue, setColour, selectedOrdinal, resolve, optionsOf, PIECES } from './builder-model.mjs?v=914e87b696d4';
 
 import { ColourPicker, rgbHex } from './builder-colour.mjs?v=a63afa0cf0f1';

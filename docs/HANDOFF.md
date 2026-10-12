@@ -4,7 +4,18 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `6c23a0d23dcf` (12 October 2026, second release of the day). It adds the corrections in [Release 6c23a0d23dcf](#release-6c23a0d23dcf) on top of `77c817dca138`. The 7 changed runtime files were uploaded dependencies-first with `builder.html` last; all 20 builder runtime files then matched local SHA-256 with HTTP 200, correct MIME and zero redirects, and the live page loaded in headless Edge (SwiftShader WebGL) with GPU and `?cpu-skinning` modes and no console errors other than the absent favicon.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `16b15af95ec5` (12 October 2026, third release of the day): [Release 16b15af95ec5](#release-16b15af95ec5) on top of `6c23a0d23dcf`. Its 5 changed runtime files were uploaded dependencies-first, all 20 builder runtime files matched local SHA-256 with zero redirects, and the live page loaded in headless Edge without console errors (favicon 404 only).
+
+## Release 16b15af95ec5
+
+- **Room collision step height:** `XRWorld.canOccupy` ignores the lowest 4 cm (`STEP_HEIGHT`). Quest room scans are bumpy (about ±1.5 cm); the old 3 mm clearance made scan noise block placement, standing, crawling and flight in Room mode, which matches the earlier "avatar gets stuck" reports.
+- **Holds are 1 s** (fly, floor sit, land) with an orange progress ring at the avatar's feet. Mostly vertical right-stick input no longer turns; wobble under 0.3 s does not restart a hold. A completed stretch hold commits takeoff while clips load (pulling back cancels); gesture clips preload after placement. Takeoff clearance is checked 15 cm up; landing uses the standing capsule and accepts a bumpy floor.
+- **Placement ring** draws above depth-only occluders and falls back to the floor plane when a scan triangle at floor height is too tilted.
+- **Occlusion source** (Scene → Performance): Off, Room setup (planes), Scanned mesh, Setup + scan (default), Live depth (WebXR `depth-sensing`, gpu-optimized, consumed by three.js; requested at session start, unverified on hardware).
+- **Wrist menu** reduced to Hide/Show panel and Reposition.
+- `tests/native-xr.mjs` now also runs both rigs on a synthetic bumpy room scan: placement, crouch sit/stand, stretch takeoff, climb and pull-back landing.
+
+## Release 6c23a0d23dcf The 7 changed runtime files were uploaded dependencies-first with `builder.html` last; all 20 builder runtime files then matched local SHA-256 with HTTP 200, correct MIME and zero redirects, and the live page loaded in headless Edge (SwiftShader WebGL) with GPU and `?cpu-skinning` modes and no console errors other than the absent favicon.
 
 **Previous release `77c817dca138`:** the Puppet T-pose/hand/upper-body fixes, native strafe correction, Floor-only collision choice, landing timing, grip removal and stretch-to-fly gestures described below. All 610 release resources passed hosted HTTP/MIME/SHA checks then (40,940,912 bytes).
 

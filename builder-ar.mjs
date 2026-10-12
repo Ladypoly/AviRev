@@ -1,6 +1,6 @@
 import * as THREE from './libs/three/package/build/three.module.js';
 import { AvatarMovementMotor } from './builder-movement.mjs?v=e772e5919b76';
-import { XRWorld } from './builder-xr-world.mjs?v=57210c1289a9';
+import { XRWorld } from './builder-xr-world.mjs?v=6f053e49e2b5';
 import { AvatarFollower } from './builder-follow.mjs?v=9cb113ed3702';
 
 export function floorCandidate(matrix, viewer, floorY = null) {
@@ -14,6 +14,10 @@ export function seatCandidate(matrix, viewer, floorY) {
 }
 
 const PERFORMANCE_KEY='avirev.xr-performance.v1';
+// Seconds a stick gesture must be held to take off, sit on the floor or land.
+const HOLD=1;
+// Occlusion sources: Quest room setup planes, the scanned room mesh, both, or live per-frame depth (needs a new session).
+const OCCLUSION={off:[],planes:['plane'],mesh:['mesh'],both:['mesh','plane'],depth:[]};
 // Resolution is fixed per WebXR session; foveation, shadows, occlusion and animation rate change live.
 const QUALITY={sharp:{scale:1,foveation:.3,shadowMap:1024},balanced:{scale:.85,foveation:.7,shadowMap:1024},fast:{scale:.7,foveation:1,shadowMap:512}};
 
@@ -39,12 +43,14 @@ export class AvatarAR {
     for(const name of ['quality','animationRate','occlusion','shadows'])if(ui[name])ui[name].onchange=()=>{this.applyPerformance();this.savePerformance();if(name==='quality'&&this.session)this.message('Foveation changed now. Resolution changes the next time you enter WebXR.');};
     this.available = this.checkSupport();
   }
-  performance(){const quality=QUALITY[this.ui.quality?.value]||QUALITY.balanced;return{...quality,stride:this.ui.animationRate?.value==='2'?2:1,occlusion:this.ui.occlusion?.checked!==false,shadows:this.ui.shadows?.checked!==false};}
-  loadPerformance(){let saved=null;try{saved=JSON.parse(localStorage.getItem(PERFORMANCE_KEY)||'null');}catch{saved=null;}if(!saved||typeof saved!=='object')return;if(this.ui.quality&&QUALITY[saved.quality])this.ui.quality.value=saved.quality;if(this.ui.animationRate&&['1','2'].includes(String(saved.animationRate)))this.ui.animationRate.value=String(saved.animationRate);if(this.ui.occlusion&&typeof saved.occlusion==='boolean')this.ui.occlusion.checked=saved.occlusion;if(this.ui.shadows&&typeof saved.shadows==='boolean')this.ui.shadows.checked=saved.shadows;}
-  savePerformance(){try{localStorage.setItem(PERFORMANCE_KEY,JSON.stringify({quality:this.ui.quality?.value,animationRate:this.ui.animationRate?.value,occlusion:this.ui.occlusion?.checked!==false,shadows:this.ui.shadows?.checked!==false}));}catch{/* Settings still apply for this visit. */}}
+  performance(){const quality=QUALITY[this.ui.quality?.value]||QUALITY.balanced;return{...quality,stride:this.ui.animationRate?.value==='2'?2:1,occlusion:OCCLUSION[this.ui.occlusion?.value]?this.ui.occlusion.value:'both',shadows:this.ui.shadows?.checked!==false};}
+  loadPerformance(){let saved=null;try{saved=JSON.parse(localStorage.getItem(PERFORMANCE_KEY)||'null');}catch{saved=null;}if(!saved||typeof saved!=='object')return;if(this.ui.quality&&QUALITY[saved.quality])this.ui.quality.value=saved.quality;if(this.ui.animationRate&&['1','2'].includes(String(saved.animationRate)))this.ui.animationRate.value=String(saved.animationRate);if(this.ui.occlusion)this.ui.occlusion.value=typeof saved.occlusion==='boolean'?saved.occlusion?'both':'off':OCCLUSION[saved.occlusion]?saved.occlusion:'both';if(this.ui.shadows&&typeof saved.shadows==='boolean')this.ui.shadows.checked=saved.shadows;}
+  savePerformance(){try{localStorage.setItem(PERFORMANCE_KEY,JSON.stringify({quality:this.ui.quality?.value,animationRate:this.ui.animationRate?.value,occlusion:this.performance().occlusion,shadows:this.ui.shadows?.checked!==false}));}catch{/* Settings still apply for this visit. */}}
   applyPerformance(){
     const settings=this.performance(),renderer=this.owner.renderer;this.owner.animationStride=settings.stride;
-    if(this.world){this.world.occlusionEnabled=settings.occlusion;this.world.updateOcclusion?.();}
+    const occlusion=settings.occlusion==='depth'&&this.session&&!this.depthActive?'both':settings.occlusion;
+    if(this.world){this.world.occlusionKinds=new Set(OCCLUSION[occlusion]);this.world.updateOcclusion?.();}
+    if(this.session&&settings.occlusion==='depth'&&!this.depthActive)this.message(this.depthRequested?'Live depth is not available here; using the room setup and scan.':'Live depth starts the next time you enter WebXR. Using the room setup and scan until then.');
     if(this.session){renderer.xr.setFoveation?.(settings.foveation);renderer.shadowMap.enabled=settings.shadows;if(this.shadowLight){this.shadowLight.castShadow=settings.shadows;if(this.shadowLight.shadow.mapSize.x!==settings.shadowMap){this.shadowLight.shadow.mapSize.set(settings.shadowMap,settings.shadowMap);this.shadowLight.shadow.map?.dispose();this.shadowLight.shadow.map=null;}}if(this.shadow)this.shadow.material.visible=settings.shadows;}
   }
   setBehavior(mode){
@@ -99,7 +105,9 @@ export class AvatarAR {
     this.busy = true; this.ui.button.disabled = true;
     const owner = this.owner, { group, scene, camera, controls, renderer } = owner;
     try {
-      let session; try { session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay', 'mesh-detection', 'plane-detection'], domOverlay: { root: this.ui.overlay } }); } catch (error) { if (error.name !== 'NotSupportedError') throw error; session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'], domOverlay: { root: this.ui.overlay } }); }
+      this.depthRequested = this.performance().occlusion === 'depth';
+      const depth = this.depthRequested ? { optionalFeatures: ['depth-sensing'], depthSensing: { usagePreference: ['gpu-optimized'], dataFormatPreference: ['unsigned-short', 'float32', 'luminance-alpha'] } } : { optionalFeatures: [] };
+      let session; try { session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay', 'mesh-detection', 'plane-detection', ...depth.optionalFeatures], ...(depth.depthSensing ? { depthSensing: depth.depthSensing } : {}), domOverlay: { root: this.ui.overlay } }); } catch (error) { if (error.name !== 'NotSupportedError') throw error; session = await navigator.xr.requestSession(this.vrSupported ? 'immersive-vr' : 'immersive-ar', { optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'], domOverlay: { root: this.ui.overlay } }); }
       this.world = new XRWorld(this.vrSupported ? null : scene); this.panelStarted = false;
       this.session = session; this.placed = false; this.walkMode = false; this.chooseSeat = false; this.headset = !!this.vrSupported || /Quest|Oculus/i.test(navigator.userAgent); if (this.ui.overlay.dataset) this.ui.overlay.dataset.headset = String(this.headset);
       this.saved = { position: group.position.clone(), quaternion: group.quaternion.clone(), scale: group.scale.clone(), visible: group.visible, background: scene.background, clearAlpha: renderer.getClearAlpha(), cameraPosition: camera.position.clone(), cameraQuaternion: camera.quaternion.clone(), target: controls.target.clone(), controlsEnabled: controls.enabled, xrEnabled: renderer.xr.enabled, shadowsEnabled: renderer.shadowMap.enabled, shadowType: renderer.shadowMap.type, casters: new Map() };
@@ -116,8 +124,11 @@ export class AvatarAR {
       this.shadowLight = new THREE.DirectionalLight(0xffffff, 0); this.shadowLight.castShadow = true;
       this.shadowLight.shadow.mapSize.set(1024, 1024); this.shadowLight.shadow.radius = 3; this.shadowLight.shadow.bias = -.0001; this.shadowLight.shadow.normalBias = .01;
       scene.add(this.shadowLight, this.shadowLight.target); this.setSize();
-      this.reticle = new THREE.Mesh(new THREE.RingGeometry(.11, .13, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x72efcd, side: THREE.DoubleSide }));
-      this.reticle.matrixAutoUpdate = false; this.reticle.visible = false; scene.add(this.reticle);
+      // The placement ring lies on the scanned floor; depth-only room occluders would hide it, so it draws on top.
+      this.reticle = new THREE.Mesh(new THREE.RingGeometry(.11, .13, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x72efcd, side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true }));
+      this.reticle.matrixAutoUpdate = false; this.reticle.visible = false; this.reticle.renderOrder = 9998; scene.add(this.reticle);
+      this.holdRing = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xffb86b, side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true }));
+      this.holdRing.visible = false; this.holdRing.renderOrder = 9997; this.holdRingStep = -1; scene.add(this.holdRing);
       scene.background = this.vrSupported ? this.saved.background : null; renderer.setClearAlpha(this.vrSupported ? 1 : 0); controls.enabled = false; group.visible = false;
       this.ui.overlay.hidden = false; this.ui.hint.textContent = 'Move your phone to find the floor, then tap the placement ring.';
       session.addEventListener('end', () => this.restore(), { once: true });
@@ -129,6 +140,8 @@ export class AvatarAR {
       const quality = this.performance(); renderer.xr.setFramebufferScaleFactor?.(quality.scale); renderer.xr.setFoveation?.(quality.foveation);
       await renderer.xr.setSession(session);
       if (this.session !== session) return;
+      // three.js draws gpu-optimized depth into the depth buffer, so real objects and hands occlude the avatar.
+      this.depthActive = !!session.enabledFeatures?.includes?.('depth-sensing') && session.depthUsage === 'gpu-optimized';
       this.applyPerformance();
       if (this.session !== session) return;
       try {
@@ -156,10 +169,10 @@ export class AvatarAR {
   async toggleFly(fromStretch=false){
     if(!this.canMove()||this.modeBusy||this.jumpState)return;
     if(this.flightMode){this.manualOverride(true);this.flying=false;this.flightAxis=0;this.motor.grounded=false;this.walkButton();return;}
-    const scale=this.owner.group.scale.x;if(this.world&&!this.collisionWorld().canOccupy(this.anchor,this.height*scale,.18*scale)){this.message('There is not enough room to take off here.');return;}
+    const scale=this.owner.group.scale.x,lift=.15*scale;if(this.world&&!this.collisionWorld().canOccupy(this.anchor.clone().setY(this.anchor.y+lift),this.height*scale,.18*scale)){this.message('There is not enough room to take off here.');return;}
     this.manualOverride(true);
     const session=this.session,generation=++this.motionGeneration;this.modeBusy=true;this.stopWalk();this.direct=this.directRequest=null;
-    try{const ready=await this.owner.prepareAction('fly');if(ready!==false&&session===this.session&&generation===this.motionGeneration&&this.canMove()&&(!fromStretch||this.stretchHeld&&this.stretchTime>=2)&&!this.trackingPaused&&this.modeClear('fly')){this.flightMode=this.flying=true;this.flightLandTime=0;this.landingBlocked=false;this.crawlMode=false;this.direct='fly';this.directDirection='forward';this.owner.setGaitDirection?.('forward');this.owner.setAction('fly');this.motor.reset();this.motor.grounded=false;this.runtimeError=null;}}
+    try{const ready=await this.owner.prepareAction('fly');if(ready!==false&&session===this.session&&generation===this.motionGeneration&&this.canMove()&&(!fromStretch||!this.crouchHeld)&&!this.trackingPaused&&this.modeClear('fly',false,lift)){this.anchor.y+=lift;this.flightMode=this.flying=true;this.flightLandTime=0;this.landingBlocked=false;this.crawlMode=false;this.direct='fly';this.directDirection='forward';this.owner.setGaitDirection?.('forward');this.owner.setAction('fly');this.motor.reset();this.motor.grounded=false;this.runtimeError=null;}}
     catch(error){if(session===this.session&&generation===this.motionGeneration)this.message(error.message);}
     finally{if(session===this.session&&generation===this.motionGeneration){this.modeBusy=false;this.walkButton();}}
   }
@@ -192,10 +205,10 @@ export class AvatarAR {
     finally { if(this.session===session&&generation===this.motionGeneration){this.seatBusy = false; this.walkButton();} }
   }
   async sitOnFloor() {
-    if (!this.canMove() || this.flightMode || this.crawlMode || !this.motor.grounded || this.floorSitBusy || this.floorSitFailed || !this.crouchHeld || this.crouchTime < 2 || !this.owner.floorSeatAnchor) return;
+    if (!this.canMove() || this.flightMode || this.crawlMode || !this.motor.grounded || this.floorSitBusy || this.floorSitFailed || !this.crouchHeld || this.crouchTime < HOLD || !this.owner.floorSeatAnchor) return;
     const session=this.session,generation=++this.motionGeneration; this.floorSitBusy=true; this.seatBusy=true; this.direct=this.directRequest=null; this.owner.setAction?.(null); this.stopWalk();
     try { const ready=await this.owner.prepareSitting('floor');
-      if (ready!==false && this.session===session && generation===this.motionGeneration && this.placed && this.crouchHeld && this.crouchTime>=2 && !this.turnInput && !this.walkIntent && !this.owner.aPose && this.owner.idlePlaying!==false) { this.posePositionTransition={from:this.owner.group.position.clone(),age:0};this.seatMode='floor'; this.seatPoint=this.anchor.clone(); this.owner.setSitting(true,'floor'); this.moveVelocity?.set(0,0,0); this.setSize(); }
+      if (ready!==false && this.session===session && generation===this.motionGeneration && this.placed && this.crouchHeld && this.crouchTime>=HOLD && !this.turnInput && !this.walkIntent && !this.owner.aPose && this.owner.idlePlaying!==false) { this.posePositionTransition={from:this.owner.group.position.clone(),age:0};this.seatMode='floor'; this.seatPoint=this.anchor.clone(); this.owner.setSitting(true,'floor'); this.moveVelocity?.set(0,0,0); this.setSize(); }
     } catch(error) { if(this.session===session&&generation===this.motionGeneration){this.floorSitFailed=true;this.message(error.message);} }
     finally { if(this.session===session&&generation===this.motionGeneration){this.floorSitBusy=false;this.seatBusy=false;this.walkButton();} }
   }
@@ -228,8 +241,9 @@ export class AvatarAR {
     catch (error) { if (this.session === session && generation===this.motionGeneration) this.message(error.message); }
     finally { if(this.navigationRequest===generation)this.navigationRequest=null; }
   }
-  modeClear(mode,quiet=false){
-    const body=this.bodyCapsule(this.owner.group.quaternion,mode),clear=!this.collisionWorld()||this.collisionWorld().canOccupy(this.anchor.clone().add(body.offset),body.height,body.radius,false,null,body.segment);
+  modeClear(mode,quiet=false,lift=0){
+    // Flight is checked above the floor it lifts off from: scanned floors are bumpy and would block a box resting on them.
+    const body=this.bodyCapsule(this.owner.group.quaternion,mode),clear=!this.collisionWorld()||this.collisionWorld().canOccupy(this.anchor.clone().add(body.offset).setY(this.anchor.y+lift),body.height,body.radius,false,null,body.segment);
     if(!clear&&!quiet)this.message(this.world?.complete?'There is not enough clear space for this movement mode.':'Room tracking must recover before changing movement mode.');return clear;
   }
   standingReady(){
@@ -268,6 +282,16 @@ export class AvatarAR {
     } catch (error) { if (this.session === session && generation===this.motionGeneration) this.message(error.message); }
     finally { if(this.session===session&&generation===this.motionGeneration)this.jumpBusy=false; }
   }
+  /** A ring at the avatar's feet fills while a stick gesture is held, so the 1 s hold is visible. */
+  updateHoldRing(){
+    const ring=this.holdRing;if(!ring)return;
+    let progress=0;if(this.placed&&!this.trackingPaused){if(!this.flightMode)progress=Math.max(this.stretchHeld||this.modeBusy?(this.stretchTime||0)/HOLD:0,this.crouchHeld&&!this.seatPoint?(this.crouchTime||0)/HOLD:0);else if(this.flying&&this.flightCrouchHeld)progress=(this.flightLandTime||0)/HOLD;}
+    progress=Math.min(1,progress);const step=progress>.03?Math.round(progress*48):0;ring.visible=step>0;if(!step)return;
+    if(step!==this.holdRingStep){ring.geometry.dispose();ring.geometry=new THREE.RingGeometry(.3,.36,48,1,Math.PI/2,-step/48*Math.PI*2).rotateX(-Math.PI/2);this.holdRingStep=step;}
+    ring.position.copy(this.anchor);ring.position.y=(this.flightMode?this.anchor.y:this.groundY??this.anchor.y)+.02;ring.scale.setScalar(this.owner.group.scale.x/.75);
+  }
+  /** Seconds a gesture has been held; stick wobble shorter than 0.3 s does not restart the count. */
+  holdTimer(name,active,elapsed){const time=name+'Time',gap=name+'Gap';if(active){this[gap]=0;return(this[time]||0)+elapsed;}this[gap]=(this[gap]||0)+elapsed;return this[gap]>.3?0:this[time]||0;}
   motionSpeed() { return this.flightMode?2.1:this.crawlMode?.25:this.direct === 'crouch' ? .55 : this.direct === 'run' ? 2.6 : 1.3; }
   bodyCapsule(rotation=this.owner.group.quaternion,modeOverride){
     const scale=this.owner.group.scale.x,native=this.owner.motionCapsule?.(modeOverride);
@@ -283,8 +307,8 @@ export class AvatarAR {
   }
   moveAvatar(elapsed,move,crouching,stretching=false){
     if(!this.canMove()){this.motor.velocity.set(0,0,0);this.stopWalk();this.direct=this.directRequest=null;this.owner.setAction?.(null);return;}
-    this.stretchTime=stretching&&!this.flightMode&&!this.crawlMode&&!this.jumpState&&!this.jumpBusy&&this.motor.grounded?(this.stretchTime||0)+elapsed:0;
-    if(this.stretchTime>=2&&!this.modeBusy)this.toggleFly(true);
+    this.stretchTime=this.holdTimer('stretch',stretching&&!this.flightMode&&!this.crawlMode&&!this.jumpState&&!this.jumpBusy&&this.motor.grounded,elapsed);
+    if(this.stretchTime>=HOLD&&stretching&&!this.modeBusy&&!this.flightMode)this.toggleFly(true);
     if(!move&&!crouching&&!stretching)this.motionFailures?.clear();
     if(!this.jumpState&&!this.jumpBusy&&!this.modeBusy){
       if(this.flightMode)this.directMotion('fly',this.flightDirection(move));else if(this.crawlMode)this.directMotion('crawl');else if(stretching)this.directMotion('stretch');else if(crouching)this.directMotion('crouch',this.gaitDirection(move));else if(move)this.directMotion(move.run?'run':'walk',move.autonomous?'forward':this.gaitDirection(move));else if((this.direct||this.directRequest)&&this.motor.velocity.length()<.03&&(this.direct!=='crouch'||this.standingReady())){this.motionGeneration++;this.direct=this.directRequest=null;this.owner.setAction?.(null);this.owner.setWalking?.(false);}
@@ -293,12 +317,12 @@ export class AvatarAR {
     if((this.direct||this.jumpState)&&move&&!stretching&&this.direct!=='stretch')target.copy(move.direction).multiplyScalar(this.motionSpeed()*(this.jumpState?.65:1));
     if(this.destination&&!move&&!crouching){const delta=this.destination.clone().sub(before);if(!this.flightMode)delta.y=0;target.copy(delta).normalize().multiplyScalar(this.motionSpeed());if(!this.turnInput)this.face(delta,elapsed);}
     if(this.flightMode&&this.flying)target.y=this.destination&&!move?THREE.MathUtils.clamp((this.destination.y-before.y)*2,-1.2,1.2):this.flightAxis*1.2;
-    const body=this.bodyCapsule(),safe=this.motor.step(before.clone().add(body.offset),target,elapsed,{world:this.collisionWorld(),height:body.height,radius:body.radius,flying:this.flightMode&&this.flying,floorY:this.groundY??before.y,segment:body.segment}).sub(body.offset);
+    const body=this.flightMode&&!this.flying?this.bodyCapsule(this.owner.group.quaternion,'standing'):this.bodyCapsule(),safe=this.motor.step(before.clone().add(body.offset),target,elapsed,{world:this.collisionWorld(),height:body.height,radius:body.radius,flying:this.flightMode&&this.flying,floorY:this.groundY??before.y,segment:body.segment}).sub(body.offset);
     this.anchor.copy(safe);this.moveVelocity=this.motor.velocity;const actualSpeed=elapsed>0?Math.hypot(safe.x-before.x,safe.z-before.z)/elapsed:0;
     if(this.flightMode&&this.flying){
-      const lowest=this.anchor.y<=(this.groundY??this.anchor.y)+.04;
-      this.flightLandTime=lowest&&this.flightCrouchHeld?(this.flightLandTime||0)+elapsed:0;
-      if(this.flightLandTime>=2){this.flying=false;this.flightAxis=0;this.motor.grounded=false;this.flightLandTime=0;this.walkButton();}
+      const lowest=this.anchor.y<=(this.groundY??this.anchor.y)+Math.max(.04,.17*this.owner.group.scale.x)||this.flightAxis<0&&safe.y>=before.y-1e-4;
+      this.flightLandTime=this.holdTimer('flightLand',lowest&&this.flightCrouchHeld,elapsed);
+      if(this.flightLandTime>=HOLD){this.flying=false;this.flightAxis=0;this.motor.grounded=false;this.flightLandTime=0;this.walkButton();}
     }else this.flightLandTime=0;
     this.owner.setCrouchMoving?.(this.direct==='crouch'&&actualSpeed>.01);this.owner.setCrawlMoving?.(this.crawlMode&&actualSpeed>.01);this.owner.setFlightMoving?.(this.flightMode&&elapsed>0&&before.distanceTo(safe)/elapsed>.01);this.owner.setGaitVelocity?.(actualSpeed);
     if(this.motor.grounded)this.groundY=this.anchor.y;
@@ -310,7 +334,7 @@ export class AvatarAR {
     if(this.flightMode&&!this.flying&&this.motor.grounded){const standing=this.bodyCapsule(this.owner.group.quaternion,'standing'),clear=!this.collisionWorld()||this.collisionWorld().canOccupy(this.anchor.clone().add(standing.offset),standing.height,standing.radius,false,null,standing.segment);if(clear){this.flightMode=false;this.landingBlocked=false;this.runtimeError=null;this.motionGeneration++;this.direct=this.directRequest=this.directionRequest=null;this.owner.setAction?.(null);this.walkButton();}else if(!this.landingBlocked){this.landingBlocked=true;this.message('Move to a clear floor before standing up.');this.walkButton();}}
     if(this.destination){const startDelta=this.destination.clone().sub(before),endDelta=this.destination.clone().sub(this.anchor);if(!this.flightMode){startDelta.y=endDelta.y=0;}if(endDelta.length()<.015||startDelta.dot(endDelta)<=0){const endpoint=this.world?this.collisionWorld().constrainMove(this.anchor.clone().add(body.offset),this.destination.clone().add(body.offset),body.height,body.radius,body.segment).sub(body.offset):this.destination;if(endpoint.distanceTo(this.destination)<.015){this.anchor.copy(endpoint);this.motor.velocity.set(0,0,0);this.stopWalk();}}else if(this.anchor.distanceToSquared(before)<1e-12&&elapsed>0)this.stopWalk();}
     const still=crouching&&!this.crawlMode&&!this.flightMode&&!stretching&&!move&&!this.turnInput&&!this.jumpState&&!this.jumpBusy&&actualSpeed<.02;
-    this.crouchTime=still?(this.crouchTime||0)+elapsed:0;if(this.crouchTime>=2)this.sitOnFloor();this.setSize();
+    this.crouchTime=this.holdTimer('crouch',still,elapsed);if(this.crouchTime>=HOLD)this.sitOnFloor();this.setSize();
   }
   roomCandidate(matrix, viewer, floorY) {
     if(this.ui.collision?.value==='floor'&&!this.chooseSeat)return {handled:false,point:null};
@@ -321,7 +345,9 @@ export class AvatarAR {
     if (!hit || this.placed && !this.world.complete) return {handled:true,point:null};
     if (!this.chooseSeat && /^(table|chair|couch|sofa|bed|desk|cabinet|shelf)$/i.test(hit.semanticLabel || '')) return {handled:true,point:null};
     const surface=new THREE.Matrix4().makeTranslation(...hit.point.toArray()); surface.elements[5]=hit.normal.y;
-    return {handled:true,point:this.chooseSeat?seatCandidate(surface,viewer,floorY):this.floorPoint(surface,viewer,floorY,hit.semanticLabel)};
+    const point=this.chooseSeat?seatCandidate(surface,viewer,floorY):this.floorPoint(surface,viewer,floorY,hit.semanticLabel);
+    // Scanned floors have tilted triangles; a rejected hit at floor height still means the ray reached the floor.
+    return {handled:true,point,floorLike:!point&&!this.chooseSeat&&floorY!==null&&Math.abs(hit.point.y-floorY)<.12};
   }
   floorPoint(matrix, viewer, floorY, label = '') {
     const point = floorCandidate(matrix,viewer,this.placed?floorY:null);
@@ -339,7 +365,8 @@ export class AvatarAR {
     let headPose,view;try{headPose=frame.getViewerPose?.(space);view=headPose?.transform.position;}catch{view=null;}const viewerTracked=!!view&&[view.x,view.y,view.z].every(Number.isFinite),viewer=viewerTracked?new THREE.Vector3(view.x,view.y,view.z):this.owner.renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
     // Frame rate is reported once per second so the status text does not force panel redraws every frame.
     if(elapsed>0){this.frameTimes=(this.frameTimes||0)+elapsed;this.frameCount=(this.frameCount||0)+1;if(this.frameTimes>=1){this.fps=Math.round(this.frameCount/this.frameTimes);this.frameTimes=this.frameCount=0;}}
-    this.world?.update(frame,space);const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored.'+(this.world&&this.world.occlusionEnabled===false?' Room occlusion off.':''):this.world?.statusText||'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
+    this.world?.update(frame,space);const occlusion=this.performance().occlusion,depthMesh=this.owner.renderer.xr.getDepthSensingMesh?.();if(depthMesh)depthMesh.visible=occlusion==='depth';
+    const roomStatus=(this.ui.collision?.value==='floor'?'Floor only · walls and furniture are ignored.':this.world?.statusText||'')+(occlusion==='depth'?this.depthActive?' · live depth occlusion':' · live depth after re-entry':'')+(this.fps?' · '+this.fps+' fps':'');if(this.ui.roomStatus&&this.ui.roomStatus.textContent!==roomStatus)this.ui.roomStatus.textContent=roomStatus;
     const inputs = [...(this.session.inputSources || [])], tracked = inputs.filter(input => input.targetRayMode === 'tracked-pointer');
     if (inputs.some(input => input.targetRayMode !== 'screen')) this.headset = true;
     if (this.headset && this.ui.panel && !this.panelStarted) { this.ui.panel.start({session:this.session,scene:this.owner.scene,renderer:this.owner.renderer,avatar:this.owner}); this.panelStarted=true; }
@@ -368,7 +395,9 @@ export class AvatarAR {
       if (pose && right && this.chooseSeat && heightStep && !entry.heightStep) this.setSeatHeight(this.manualSeatHeight * 100 - heightStep * 5); entry.heightStep = heightStep;
       if (pose && right && controls && axes.length>=4 && !this.chooseSeat && !this.owner.aPose && this.owner.idlePlaying!==false) {
         const x=Number(axes[2]),z=Number(axes[3]);if(this.flightMode&&Math.abs(z)>.18)entry.flightAxisUsed=true;else if(Math.abs(z)<=.18)entry.flightAxisUsed=false;
-        if(Number.isFinite(x)&&Math.abs(x)>.18){this.manualOverride();this.turnInput=-Math.sign(x)*Math.min(1,(Math.abs(x)-.18)/.82)*1.8;}
+        // A mostly vertical right stick is a stretch/crouch/altitude gesture; sideways drift must not turn or reset its hold timer.
+        const vertical=Number.isFinite(z)&&Math.abs(z)>.35&&Math.abs(x)<Math.abs(z)*.75;
+        if(Number.isFinite(x)&&Math.abs(x)>.18&&!vertical){this.manualOverride();this.turnInput=-Math.sign(x)*Math.min(1,(Math.abs(x)-.18)/.82)*1.8;}
         const forward=Number.isFinite(z)&&z<-.35;
         if(this.behavior!=='puppet'&&this.seatPoint&&forward&&!entry.standPressed){this.stand();entry.standPressed=true;}else if(!forward)entry.standPressed=false;
         if(this.flightMode&&this.flying){this.flightAxis=Number.isFinite(z)&&Math.abs(z)>.18?-Math.sign(z)*Math.min(1,(Math.abs(z)-.18)/.82):0;this.flightCrouchHeld=Number.isFinite(z)&&z>.35;}
@@ -383,7 +412,7 @@ export class AvatarAR {
       if(left&&(!pose||!controls||!(this.canMove()||this.floorSitBusy)))entry.runPressed=pressed(3);
       if (!pose || !choosing) continue;
       entry.line.matrix.fromArray(pose.transform.matrix); const room=this.roomCandidate(entry.line.matrix,viewer,floorY); entry.candidate=room.handled?room.point:this.hitCandidate(frame,entry.source,viewer,space,floorY);
-      if (!room.handled && !entry.candidate && floorY !== null && (!this.chooseSeat || entry.sourceUnavailable)) {
+      if ((!room.handled || room.floorLike) && !entry.candidate && floorY !== null && (!this.chooseSeat || entry.sourceUnavailable)) {
         const origin = new THREE.Vector3().setFromMatrixPosition(entry.line.matrix), direction = new THREE.Vector3(0, 0, -1).transformDirection(entry.line.matrix);
         const height = floorY + (this.chooseSeat ? this.manualSeatHeight : 0);
         if (direction.y < -.05) { const distance = (height - origin.y) / direction.y; if (distance > 0 && distance < 4) { const matrix = new THREE.Matrix4().makeTranslation(...origin.addScaledVector(direction, distance).toArray()); entry.candidate = this.chooseSeat ? seatCandidate(matrix, viewer, floorY) : floorCandidate(matrix, viewer, floorY); } }
@@ -398,7 +427,7 @@ export class AvatarAR {
     if (!rightTracked) { crouching=stretching=false;this.turnInput=0;this.flightAxis=0;this.flightCrouchHeld=false; }
     this.crouchHeld=crouching;this.stretchHeld=stretching;this.walkIntent=!!move;
     if(this.turnInput&&this.placed&&viewerTracked&&this.canMove()){const next=this.owner.group.quaternion.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed)),body=this.bodyCapsule(next);if((body.offset.lengthSq()>0||body.segment)&&this.world&&!this.collisionWorld().canOccupy(this.anchor.clone().add(body.offset),body.height,body.radius,false,null,body.segment))this.turnInput=0;else{this.owner.group.quaternion.copy(next);move?.direction.applyAxisAngle(new THREE.Vector3(0,1,0),this.turnInput*elapsed);this.setSize();}}
-    if(!crouching||move||this.turnInput||this.jumpState||this.jumpBusy)this.crouchTime=0;
+    if(move||this.jumpState||this.jumpBusy)this.crouchTime=this.crouchGap=0;
     if(!crouching)this.floorSitFailed=false;
     if((!crouching&&this.directRequest==='crouch')||(!stretching&&this.directRequest==='stretch')){this.motionGeneration++;this.directRequest=null;}
     this.trackingPaused=!viewerTracked||this.headset&&!anyTracked;
@@ -412,6 +441,7 @@ export class AvatarAR {
       }else this.companionStatus='Follow paused · place a standing avatar with valid room tracking.';
     }
     if(this.anchor){if(this.trackingPaused){this.motor.velocity.set(0,0,0);this.crouchTime=this.stretchTime=this.flightLandTime=0;this.puppetCalibrationRequested=false;this.owner.setGaitVelocity?.(0);this.owner.setCrawlMoving?.(false);this.owner.setFlightMoving?.(false);}else this.moveAvatar(elapsed,move,crouching,stretching);}
+    this.updateHoldRing();
     if (!this.headset && choosing) { const camera=this.owner.renderer.xr.getCamera(),matrix=new THREE.Matrix4().compose(viewer,camera.getWorldQuaternion(new THREE.Quaternion()),new THREE.Vector3(1,1,1)),room=this.roomCandidate(matrix,viewer,floorY); candidate=room.handled?room.point:this.hitCandidate(frame,this.source,viewer,space,floorY); }
     this.phoneCandidate = !this.headset ? candidate : null; this.reticle.visible = !!candidate; if (candidate) this.reticle.matrix.makeTranslation(...candidate.toArray());
     let hint = this.headset ? !tracked.length ? 'Connect a controller. Point its ray at the floor and press the trigger.' : candidate ? this.placed ? 'Point at a floor destination and press the trigger to walk.' : 'Press the trigger to place your avatar on the floor.' : this.placed ? 'Point at the ground and press the trigger to walk there.' : 'Point a controller ray down at the floor.' : candidate ? this.placed ? 'Tap a floor destination to walk there.' : 'Tap the ring to place your avatar.' : this.placed ? 'Tap the ground ring to walk there.' : 'Move your phone slowly and point at the floor.';
@@ -439,9 +469,11 @@ export class AvatarAR {
     this.anchor = anchor.clone();this.groundY=anchor.y;this.motor.reset();this.crawlMode=this.flightMode=this.flying=false; this.setSize();
     // Native avatar front is +Z; keep it upright and face the phone.
     owner.group.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(direction.x, direction.z));
-    owner.group.visible = true; this.shadow.visible = true; this.placed = true; this.reticle.visible = false;
+    owner.group.visible = true; this.shadow.visible = true; this.placed = true; this.reticle.visible = false; this.preloadGestures();
     this.ui.hint.textContent = 'Walk around your avatar. Use Reposition to choose another spot.'; this.walkButton();
   }
+  /** Loads hold-gesture clips in the background so the first takeoff or floor sit does not wait for downloads. */
+  async preloadGestures(){const session=this.session,owner=this.owner;try{for(const name of ['stretch','crouch','fly']){if(this.session!==session)return;await owner.prepareAction?.(name);}if(this.session===session)await owner.prepareSitting?.('floor');}catch{/* The gesture itself reports loading errors. */}}
   avatarChanged(standingBounds=null) {
     if (!this.session || !this.saved) return;
     const bounds=standingBounds?standingBounds.clone():new THREE.Box3(),currentCasters=new Set();this.owner.group.traverse(object=>{if(object.isMesh)currentCasters.add(object);});
@@ -497,6 +529,8 @@ export class AvatarAR {
     this.motionFailures?.clear(); this.runtimeError = null; this.activeRayInput = this.displayRayInput = null; if (this.ui.overlay.dataset) delete this.ui.overlay.dataset.headset;
     this.source?.cancel(); this.source = null; this.session = null; this.placed = false; this.anchor = null;
     if (this.reticle) { this.owner.scene.remove(this.reticle); this.reticle.geometry.dispose(); this.reticle.material.dispose(); this.reticle = null; }
+    if (this.holdRing) { this.owner.scene.remove(this.holdRing); this.holdRing.geometry.dispose(); this.holdRing.material.dispose(); this.holdRing = null; }
+    this.depthActive = this.depthRequested = false;
     if (this.shadow) { this.owner.scene.remove(this.shadow); this.shadow.geometry.dispose(); this.shadow.material.dispose(); this.shadow = null; }
     if (this.shadowLight) { this.owner.scene.remove(this.shadowLight, this.shadowLight.target); this.shadowLight.shadow.dispose(); this.shadowLight = null; }
     const saved = this.saved, owner = this.owner;

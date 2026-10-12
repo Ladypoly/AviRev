@@ -55,34 +55,53 @@ for (const family of data.families) for (const [calibrationName, calibration] of
 // 2. Holding crouch sits on the floor (pelvis near the floor, not frozen at hip height); right stick forward stands again.
 class E extends EventTarget { hidden = true; disabled = false; textContent = ''; value = '75'; checked = true; setAttribute() {} }
 const parity = {};
-for (const familyName of ['human', 'robot']) {
-  const { r, family } = await rig(familyName);
+// A Quest room scan is a bumpy triangle mesh: ±1.5 cm noise on a 6 cm grid gives tilted floor triangles.
+function scannedFloor() {
+  const size = 4, cell = .06, count = Math.round(size / cell) + 1, vertices = [], indices = []; let seed = 7;
+  const noise = () => { seed = (seed * 16807) % 2147483647; return (seed / 2147483647 - .5) * .03; };
+  for (let z = 0; z < count; z++) for (let x = 0; x < count; x++) vertices.push(-size / 2 + x * cell, noise(), -size / 2 + z * cell);
+  for (let z = 0; z < count - 1; z++) for (let x = 0; x < count - 1; x++) { const a = z * count + x, b = a + 1, c = a + count, d = c + 1; indices.push(a, c, b, b, c, d); }
+  return { vertices: Float32Array.from(vertices), indices: Uint32Array.from(indices), semanticLabel: 'global mesh', lastChangedTime: 1, meshSpace: 'roomSpace' };
+}
+for (const [familyName, collision] of [['human', 'floor'], ['robot', 'floor'], ['human', 'room'], ['robot', 'room']]) {
+  const { r, family } = await rig(familyName), label = familyName + (collision === 'room' ? ' (bumpy room scan)' : '');
   const session = Object.assign(new EventTarget(), { inputSources: [], async requestReferenceSpace(type) { return type; }, async requestHitTestSource() { return { cancel() {} }; }, async end() { this.dispatchEvent(new Event('end')); } });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'OculusBrowser', xr: { isSessionSupported: async type => type === 'immersive-ar', requestSession: async () => session } } });
   const ui = Object.fromEntries(['button', 'status', 'overlay', 'controls', 'hint', 'exit', 'reposition', 'size', 'sizeLabel', 'walk', 'sit', 'turn', 'seatHeight', 'seatHeightLabel', 'seatHeightControls', 'crawl', 'fly', 'roomStatus', 'behavior', 'mirror', 'calibrate', 'collision', 'runMode'].map(key => [key, new E()]));
-  ui.collision.value = 'floor'; ui.behavior.value = 'manual'; ui.runMode.value = 'toggle';
+  ui.collision.value = collision; ui.behavior.value = 'manual'; ui.runMode.value = 'toggle';
   const scene = new T.Scene(), viewer = new T.PerspectiveCamera(); scene.add(r.group); viewer.position.set(0, 1.6, 1.5);
   Object.assign(r, { scene, camera: new T.PerspectiveCamera(), controls: { enabled: true, target: new T.Vector3() }, resize() {}, renderer: { shadowMap: { enabled: false }, getClearAlpha: () => 1, setClearAlpha() {}, xr: { enabled: false, setReferenceSpaceType() {}, async setSession() {}, getReferenceSpace: () => 'space', getCamera: () => viewer, setFramebufferScaleFactor() {}, setFoveation() {} } } });
   const ar = new AvatarAR(r, ui); r.ar = ar; await ar.available; await ar.start();
   const mapped = (handedness, x) => ({ handedness, targetRayMode: 'tracked-pointer', profiles: ['oculus-touch-v3'], targetRaySpace: { x }, gripSpace: { x }, gamepad: { mapping: 'xr-standard', buttons: Array.from({ length: 6 }, () => ({ pressed: false })), axes: [0, 0, 0, 0] } });
   const right = mapped('right', .3); session.inputSources = [mapped('left', -.3), right];
   const pose = m => ({ transform: { matrix: m.toArray(), position: { x: m.elements[12], y: m.elements[13], z: m.elements[14] } } }), ray = new T.Matrix4().compose(v(.3, 1, .8), new T.Quaternion().setFromAxisAngle(v(1, 0, 0), -Math.PI / 3), v(1, 1, 1));
-  const frame = { getViewerPose: () => pose(new T.Matrix4().makeTranslation(0, 1.6, 1.5)), getPose: space => pose(ray.clone().setPosition(space.x, 1, .8)), getHitTestResults: () => [] };
+  const room = collision === 'room' ? new Set([scannedFloor()]) : undefined;
+  const frame = { detectedMeshes: room, getViewerPose: () => pose(new T.Matrix4().makeTranslation(0, 1.6, 1.5)), getPose: space => space === 'roomSpace' ? pose(new T.Matrix4()) : pose(ray.clone().setPosition(space.x, 1, .8)), getHitTestResults: () => [] };
   let time = 0; const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve)); };
   const step = async (seconds = 1 / 72) => { for (let t = 0; t < seconds; t += 1 / 72) { time += 1 / 72; ar.update(frame, time); r.animationPlayer()?.update(time, r.active); ar.refreshPoseGround(); await settle(); } };
-  await step(); await ar.place({ inputSource: right }); check(ar.placed, familyName + ' placed');
+  await step(); await ar.place({ inputSource: right }); check(ar.placed && ar.reticle && (!room || ar.world.hasGeometry), label + ' placed with the controller ring');
   const pelvis = family.skeleton.find(bone => bone.name === (familyName === 'human' ? 'root.x' : 'Hips'));
   const measure = () => { let low = Infinity; for (const item of r.active) { const positions = r.posedPositions(item); for (let i = 1; i < positions.length; i += 3) low = Math.min(low, positions[i]); } const scale = r.group.scale.x; return { pelvis: r.group.position.y + r.animationPlayer().pose().get(pelvis.path).elements[13] * scale - ar.anchor.y, low: r.group.position.y + low * scale - ar.anchor.y }; };
   await step(.4); const standing = measure();
-  right.gamepad.axes[3] = 1; await step(3); const seated = measure();
-  check(r.sitting && r.seatMode === 'floor', familyName + ' crouch hold sits on the floor');
-  check(seated.pelvis < .15 && seated.pelvis < standing.pelvis * .3, `${familyName} seated pelvis near floor (${seated.pelvis.toFixed(3)} m, standing ${standing.pelvis.toFixed(3)} m)`);
-  check(Math.abs(seated.low) < .03, `${familyName} seated body rests on floor (${seated.low.toFixed(3)} m)`);
+  // Real thumbs drift sideways and wobble: 30% sideways tilt plus a 0.1 s dropout must not restart the 1 s hold.
+  right.gamepad.axes[2] = .3; right.gamepad.axes[3] = 1; await step(.5); check(ar.holdRing.visible, label + ' hold ring shows crouch progress'); right.gamepad.axes[3] = .2; await step(.1); right.gamepad.axes[3] = 1; await step(1);
+  check(r.sitting && r.seatMode === 'floor', label + ' drifting, wobbling crouch hold still sits'); right.gamepad.axes[2] = 0; await step(1); const seated = measure();
+  check(r.sitting && r.seatMode === 'floor', label + ' crouch hold sits on the floor');
+  check(seated.pelvis < .15 && seated.pelvis < standing.pelvis * .3, `${label} seated pelvis near floor (${seated.pelvis.toFixed(3)} m, standing ${standing.pelvis.toFixed(3)} m)`);
+  check(Math.abs(seated.low) < .03, `${label} seated body rests on floor (${seated.low.toFixed(3)} m)`);
   right.gamepad.axes[3] = 0; const heading = r.group.quaternion.clone(); right.gamepad.axes[2] = 1; await step(.5); right.gamepad.axes[2] = 0;
-  check(r.group.quaternion.angleTo(heading) < 1e-6 && r.sitting, familyName + ' right stick does not spin a seated avatar');
+  check(r.group.quaternion.angleTo(heading) < 1e-6 && r.sitting, label + ' right stick does not spin a seated avatar');
   await step(); right.gamepad.axes[3] = -1; await step(.2); right.gamepad.axes[3] = 0; await step(1.2); const stood = measure();
-  check(!r.sitting && Math.abs(stood.pelvis - standing.pelvis) < .03 && Math.abs(stood.low) < .03, familyName + ' right stick forward stands back on the floor');
+  check(!r.sitting && Math.abs(stood.pelvis - standing.pelvis) < .03 && Math.abs(stood.low) < .03, label + ' right stick forward stands back on the floor');
+  // Stretch with sideways drift and a short wobble takes off within the 1 s hold plus clip loading.
+  right.gamepad.axes[2] = -.3; right.gamepad.axes[3] = -1; await step(.5); right.gamepad.axes[3] = -.2; await step(.1); right.gamepad.axes[3] = -1; for (let i = 0; i < 40 && !ar.flightMode; i++) await step(.1);
+  check(ar.flightMode && ar.flying, label + ' drifting, wobbling stretch hold enters flight' + (ar.runtimeError ? ': ' + ar.runtimeError : ''));
+  right.gamepad.axes[2] = 0; await step(.6); const high = ar.anchor.y; check(high > (ar.groundY ?? 0) + .3, label + ' flight climbs');
+  right.gamepad.axes[3] = 1; for (let i = 0; i < 120 && ar.flightMode; i++) await step(.1);
+  check(!ar.flightMode && ar.motor.grounded && Math.abs(ar.anchor.y - ar.groundY) < .05, label + ' pulling back descends and lands on the floor' + (ar.runtimeError ? ': ' + ar.runtimeError : ''));
+  right.gamepad.axes[3] = 0;
   await session.end();
+  if (collision === 'room') continue;
 
   // 3. GPU skinning: every native mesh is a SkinnedMesh and its lazily skinned CPU positions equal the legacy CPU skin.
   check(r.active.every(item => item.mesh.isSkinnedMesh && item.mesh.skeleton.boneTexture), familyName + ' all meshes GPU skinned');
@@ -93,4 +112,4 @@ for (const familyName of ['human', 'robot']) {
   let worst = 0; r.active.forEach((item, index) => { const cpu = item.geometry.getAttribute('position').array; for (let i = 0; i < cpu.length; i++) worst = Math.max(worst, Math.abs(cpu[i] - gpu[index][i])); });
   check(worst < 1e-5, `${familyName} GPU-skin positions equal legacy CPU skin (max ${worst} m)`); parity[familyName] = worst;
 }
-console.log(JSON.stringify({ status: 'PASS', checks, coverage: 'Native Human/Robot: absolute grip hand orientation (palms-forward and palms-down calibration, direct/mirror), crouch-hold floor sit and stand, GPU-skin position parity', parity, limits: ['GPU shader output is checked in a browser, not here; Quest comfort/frame time still need the headset.'] }));
+console.log(JSON.stringify({ status: 'PASS', checks, coverage: 'Native Human/Robot: absolute grip hand orientation (palms-forward and palms-down calibration, direct/mirror), 1 s crouch-hold floor sit and stand, stretch takeoff and pull-back landing with Floor-only and a bumpy scanned room mesh, GPU-skin position parity', parity, limits: ['GPU shader output is checked in a browser, not here; Quest comfort/frame time still need the headset.'] }));
