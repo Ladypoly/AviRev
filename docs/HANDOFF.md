@@ -4,9 +4,17 @@ Updated 12 October 2026. AviRev reviews exported avatar assets and builds Human/
 
 ## Release status
 
-**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `6bd9b9bb07e3` (12 October 2026, fourth release of the day): [Release 6bd9b9bb07e3](#release-6bd9b9bb07e3) on top of `16b15af95ec5`. Its 10 changed runtime files were uploaded dependencies-first with `builder.html` last; all 22 builder runtime files (including `browser_data/creator_contract.json`) byte-matched local with HTTP 200, correct MIME and zero redirects, and the live page ran 8 creator states in headless Edge without console errors.
+**Live on Bonto:** https://avi-rev.bonto.run/builder.html serves builder `1bb0d039acad` (12 October 2026, fifth release of the day): [Release 1bb0d039acad](#release-1bb0d039acad) on top of `6bd9b9bb07e3`. Its 4 changed runtime files were uploaded with `builder.html` last; all 22 builder runtime files byte-matched local with HTTP 200 and zero redirects, and the live page ran at 2560×1330 without console errors.
+
+## Release 1bb0d039acad
+
+- **Wide screens (≥1500 px):** the creator grows to `min(2400px, 100% - 96px)` instead of Unity's 1230 px cap; the nav column stays 300–420 px, the mirror takes 3 shares and the detail column 2 (max 1100 px). Below 1500 px the Unity metrics are unchanged.
+- **Mirror re-frames on resize** (the ResizeObserver path), so a window resize no longer leaves a stale close-up.
+- **Close-ups follow the head** (`followHead`): Face/Head framing eases toward the idle's head bone each frame; an OrbitControls `start` stops following until the next `frame()`.
 
 ## Release 6bd9b9bb07e3
+
+Released as builder `6bd9b9bb07e3` on top of `16b15af95ec5`. Its 10 changed runtime files were uploaded dependencies-first with `builder.html` last; all 22 builder runtime files (including `browser_data/creator_contract.json`) byte-matched local with HTTP 200, correct MIME and zero redirects, and the live page ran 8 creator states in headless Edge without console errors.
 
 - **Unity-identical browser creator.** `builder.html`/`builder.css`/`builder.js` were rewritten after `AvatarPanelPresenter`, `AvatarUiStyles`, `OptionTile` and `ColourColumn`: nav card (family switch, groups with "n of m" captions), mirror card (Front/Side), detail card (rows, 88 px tiles with CDN pictures, sliders, segments) and the colour column (`ColorPickerElement` compact theme, presets, glow). Unity element ids (`veAvatarTab`, `btnAvatarColour`, `scrAvatarColour`…) are kept for cross-reference. The only extra chrome is the WebXR/AR launch button in the top-right corner; review tools sit in a drawer behind the existing review unlock.
 - **Unity rules, not web approximations.** `builder-contract.mjs` ports `OptionAvailability`, `AvatarConfigResolver.Clamp`, `WornConfig.For`, `DefaultLook`, `ClothingLayers.Pick`, `BodyShape.SetFemale`, `HeadgearRules` and `HumanColourDefaults` over `browser_data/creator_contract.json`, a one-off read-only export of Unity's catalog, strings, palettes, allowances and glow limits at the top of the reward ladder (level 50; ladder saved 2026-10-12T09:48Z). The temporary Unity exporter was deleted after use; Unity has no trace of it.

@@ -88,7 +88,7 @@ export class AvatarRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); this.renderer.outputColorSpace = THREE.SRGBColorSpace; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1;
     element.append(this.renderer.domElement); this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#20242d');
     this.camera = new THREE.PerspectiveCamera(34, 1, .01, 200); this.camera.position.set(2.5, 1.5, -4);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement); this.controls.enableDamping = true; this.controls.minDistance = .1; this.controls.maxDistance = 30; this.controls.target.set(0, 1, 0);
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement); this.controls.enableDamping = true; this.controls.minDistance = .1; this.controls.maxDistance = 30; this.controls.target.set(0, 1, 0); this.controls.addEventListener('start', () => { this.follow = null; });
     this.controls.listenToKeyEvents(element);
     element.addEventListener('keydown', event => { if (event.key === 'Home' && !this.ar?.session) { event.preventDefault(); this.focus('Body'); this.frame(); } });
     // Metallic details need an environment reflection as well as direct lights.
@@ -101,7 +101,7 @@ export class AvatarRenderer {
     this.wireMaterial = new THREE.MeshBasicMaterial({ color: 0x181d20, wireframe: true, transparent: true, opacity: .34, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
     this.cutMaterial = new THREE.MeshBasicMaterial({ color: 0xe644aa, transparent: true, opacity: .55, depthWrite: false, side: THREE.DoubleSide });
     new ResizeObserver(() => this.resize()).observe(element); this.resize();
-    this.renderer.setAnimationLoop((time, frame) => { this.ar?.update(frame, time / 1000); this.puppetLayer?.update(time / 1000); this.renderFrame = (this.renderFrame || 0) + 1; if (this.renderFrame % (this.animationStride || 1) === 0) this.animationPlayer()?.update(time / 1000, this.active); this.ar?.refreshPoseGround?.(); if (!this.ar?.session) this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop((time, frame) => { this.ar?.update(frame, time / 1000); this.puppetLayer?.update(time / 1000); this.renderFrame = (this.renderFrame || 0) + 1; if (this.renderFrame % (this.animationStride || 1) === 0) this.animationPlayer()?.update(time / 1000, this.active); this.ar?.refreshPoseGround?.(); if (!this.ar?.session) { this.followHead(); this.controls.update(); } this.renderer.render(this.scene, this.camera); });
   }
   puppetReference() {
     const family = this.currentFamily, pose = this.puppetLayer?.referencePose();
@@ -287,7 +287,7 @@ export class AvatarRenderer {
   }
   setAPose(value) { this.aPose = !!value; if (this.aPose && this.ar?.session) this.ar.stopMotion(); this.idlePlayer?.setAPose(this.aPose); this.idlePlayer?.update(performance.now() / 1000, this.active); this.frame(); }
   focus(kind) { this.focusKind = ['Body', 'Head', 'Face', 'Bust', 'Feet'].includes(kind) ? kind : 'Body'; }
-  resize() { if (this.renderer.xr.isPresenting) return; const width = this.element.clientWidth, height = this.element.clientHeight; if (!width || !height) return; this.renderer.setSize(width, height); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); }
+  resize() { if (this.renderer.xr.isPresenting) return; const width = this.element.clientWidth, height = this.element.clientHeight; if (!width || !height) return; this.renderer.setSize(width, height); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); if (this.framed) this.frame(); }
   async mesh(family, definition) {
     const key = `${family.Family}:${definition.id}`;
     return cachedLoad(this.cache, key, async () => {
@@ -386,6 +386,14 @@ export class AvatarRenderer {
     const distance = slice / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.08;
     const directions = { front: [0, .03, 1], threequarter: [.55, .08, 1], side: [1, .03, 0], back: [0, .03, -1] };
     this.camera.position.copy(center).add(new THREE.Vector3(...directions[view]).normalize().multiplyScalar(distance)); this.camera.near = Math.max(.001, distance / 1000); this.camera.far = distance * 100; this.camera.updateProjectionMatrix(); this.controls.update();
+    this.follow = headFocus && measuredHead ? { anchor: measuredHead.clone(), target: center.clone() } : null;
+  }
+  /** Close-ups follow the head bone as the idle moves it (Unity's mirror tracks the head); a user orbit stops following until the next frame(). */
+  followHead() {
+    const follow = this.follow; if (!follow || this.ar?.session) return;
+    const row = this.currentFamily?.skeleton?.find(item => item.name === 'head.x' || item.name === 'Head'), m = row && this.idlePlayer?.pose()?.get(row.path)?.elements; if (!m) return;
+    const step = follow.target.clone().add(new THREE.Vector3(-m[12] - follow.anchor.x, m[13] - follow.anchor.y, 0)).sub(this.controls.target).multiplyScalar(.08);
+    this.controls.target.add(step); this.camera.position.add(step);
   }
   posedPositions(item) { return posedPositions(item); }
   /** Posed bounds in group-parent space; GPU-skinned geometry attributes stay in bind pose. */

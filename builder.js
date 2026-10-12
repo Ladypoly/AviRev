@@ -1,5 +1,5 @@
 import { assetJSON } from './builder-assets.mjs?v=c326a7020e52';
-import { AvatarRenderer } from './builder-renderer.mjs?v=ce452c282e8d';
+import { AvatarRenderer } from './builder-renderer.mjs?v=69fb0700ac59';
 import { XRConfiguratorPanel, creatorPanelBridge } from './builder-xr-panel.mjs?v=517daf99172e';
 import { AvatarAR } from './builder-ar.mjs?v=ae6819f487cb';
 import { resolve } from './builder-model.mjs?v=2776b8514534';
